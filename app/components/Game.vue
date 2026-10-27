@@ -3,9 +3,9 @@
     <div ref="root" style="position:fixed;inset:0;"></div>
 
     <!-- HUD -->
-    <div v-if="gameState === 'playing'" style="position:fixed;bottom:20px;left:20px;color:#fff;font:bold 20px sans-serif;text-shadow:0 2px 4px #000;z-index:5;">
-      <div style="color:#ff5555;">HP: {{ playerHp }} / {{ maxHp }}</div>
-      <div style="font-size:24px;color:#00ffcc;margin-top:4px;font-weight:bold;">
+    <div v-if="gameState === 'playing'" style="position:fixed;bottom:20px;left:20px;color:#fff;font:bold 20px 'Courier New', monospace;text-shadow:0 0 10px #00ffff;z-index:5;">
+      <div style="color:#ff0055;">HP: {{ playerHp }} / {{ maxHp }}</div>
+      <div style="font-size:24px;color:#00ffff;margin-top:4px;font-weight:bold;">
         {{ currentWeapon.toUpperCase() }}:
         <span v-if="isReloading" style="color:#ffaa00;">RELOADING...</span>
         <span v-else>{{ currentAmmo }} / {{ maxAmmo }}</span>
@@ -14,75 +14,85 @@
       <div v-if="comboCount > 1" style="font-size:22px;color:#ffd700;margin-top:4px;text-shadow:0 0 10px #ffd700;">🔥 COMBO x{{ comboCount }}</div>
     </div>
 
-    <div v-if="gameState === 'playing'" style="position:fixed;top:20px;left:20px;color:#fff;font:bold 24px sans-serif;text-shadow:0 2px 4px #000;z-index:5;">
-      <div>WAVE: <span style="color:#00ffcc">{{ wave }}</span> <span v-if="wave % 5 === 0" style="color:red;font-size:18px;">[BOSS]</span></div>
+    <div v-if="gameState === 'playing'" style="position:fixed;top:20px;left:20px;color:#fff;font:bold 24px 'Courier New', monospace;text-shadow:0 0 10px #00ffff;z-index:5;">
+      <div>WAVE: <span style="color:#00ffff">{{ wave }}</span> <span v-if="wave % 5 === 0" style="color:red;font-size:18px;text-shadow:0 0 10px red;">[BOSS]</span></div>
       <div>SCORE: <span style="color:#ffd700">{{ score }}</span></div>
       <div>SCRAP: <span style="color:#00ffaa">{{ scrap }}</span></div>
-      <div style="font-size:16px;color:#ff8888;margin-top:4px;">Enemies Left: {{ enemiesLeft }}</div>
+      <div style="font-size:16px;color:#ff0055;margin-top:4px;">Enemies Left: {{ enemiesLeft }}</div>
     </div>
 
     <div v-if="gameState === 'playing'" style="position:fixed;top:20px;right:240px;z-index:6;display:flex;flex-direction:column;align-items:flex-end;">
-      <div v-for="k in killFeed" :key="k.id" style="background:rgba(0,0,0,0.75);color:#fff;padding:6px 12px;margin-bottom:4px;border-radius:4px;font:14px sans-serif;border-left:3px solid #ff3333;">{{ k.text }}</div>
+      <div v-for="k in killFeed" :key="k.id" style="background:rgba(0,0,0,0.7);color:#00ffff;padding:6px 12px;margin-bottom:4px;border-radius:2px;font:14px 'Courier New', monospace;border-left:2px solid #ff0055;box-shadow:0 0 10px rgba(0,255,255,0.2);">{{ k.text }}</div>
     </div>
 
     <div v-if="announceVisible" style="position:fixed;top:35%;left:50%;transform:translate(-50%,-50%);z-index:25;pointer-events:none;text-align:center;">
-      <div style="font:bold 72px sans-serif;color:#00ffcc;text-shadow:0 0 30px #00ffcc,0 4px 8px #000;letter-spacing:4px;">{{ announceText }}</div>
-      <div v-if="announceSub" style="font:bold 24px sans-serif;color:#ff5555;text-shadow:0 0 20px #ff5555,0 2px 4px #000;margin-top:8px;">{{ announceSub }}</div>
+      <div style="font:bold 72px 'Courier New', monospace;color:#00ffff;text-shadow:0 0 30px #00ffff,0 0 60px #00ffff,0 4px 8px #000;letter-spacing:8px;">{{ announceText }}</div>
+      <div v-if="announceSub" style="font:bold 24px 'Courier New', monospace;color:#ff0055;text-shadow:0 0 20px #ff0055,0 2px 4px #000;margin-top:8px;">{{ announceSub }}</div>
     </div>
 
-    <div v-if="gameState === 'playing'" style="position:fixed; top:20px; right:20px; width:200px; height:200px; border:2px solid #00ffcc; pointer-events:none; z-index:5; background:rgba(0,0,0,0.5); box-shadow: 0 0 10px rgba(0,255,204,0.5);"></div>
+    <div v-if="gameState === 'playing'" style="position:fixed; top:20px; right:20px; width:200px; height:200px; border:2px solid #00ffff; pointer-events:none; z-index:5; background:rgba(0,0,0,0.6); box-shadow: 0 0 15px rgba(0,255,255,0.3);"></div>
 
     <div v-if="gameState === 'playing' && !isAiming" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:20;display:flex;align-items:center;justify-content:center;">
-      <div style="width:6px;height:6px;background:#00ffcc;border-radius:50%;box-shadow:0 0 6px #000;"></div>
+      <div style="width:6px;height:6px;background:#00ffff;border-radius:50%;box-shadow:0 0 8px #00ffff;"></div>
       <div v-if="hitmarker" style="position:absolute;width:24px;height:24px;">
-        <div :style="{position:'absolute',width:'100%',height:'3px',background:hitmarkerColor,transform:'rotate(45deg)',top:'11px',boxShadow:'0 0 6px '+hitmarkerColor}"></div>
-        <div :style="{position:'absolute',width:'100%',height:'3px',background:hitmarkerColor,transform:'rotate(-45deg)',top:'11px',boxShadow:'0 0 6px '+hitmarkerColor}"></div>
+        <div :style="{position:'absolute',width:'100%',height:'3px',background:hitmarkerColor,transform:'rotate(45deg)',top:'11px',boxShadow:'0 0 8px '+hitmarkerColor}"></div>
+        <div :style="{position:'absolute',width:'100%',height:'3px',background:hitmarkerColor,transform:'rotate(-45deg)',top:'11px',boxShadow:'0 0 8px '+hitmarkerColor}"></div>
       </div>
     </div>
 
-    <div v-if="gameState === 'playing' && isAiming" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:20;">
-      <div v-if="hitmarker" style="position:absolute;width:24px;height:24px;transform:translate(-50%,-50%);">
-        <div :style="{position:'absolute',width:'100%',height:'3px',background:hitmarkerColor,transform:'rotate(45deg)',top:'11px',boxShadow:'0 0 6px '+hitmarkerColor}"></div>
-        <div :style="{position:'absolute',width:'100%',height:'3px',background:hitmarkerColor,transform:'rotate(-45deg)',top:'11px',boxShadow:'0 0 6px '+hitmarkerColor}"></div>
+    <div v-if="gameState === 'playing' && isAiming && currentWeapon === 'sniper'" style="position:fixed;inset:0;pointer-events:none;z-index:20;">
+      <div style="position:absolute;inset:0;background:radial-gradient(circle, transparent 30%, black 31%);"></div>
+      <div style="position:absolute;top:50%;left:0;right:0;height:2px;background:black;transform:translateY(-50%);"></div>
+      <div style="position:absolute;top:0;bottom:0;left:50%;width:2px;background:black;transform:translateX(-50%);"></div>
+      <div style="position:absolute;top:50%;left:50%;width:4px;height:4px;background:red;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 10px red;"></div>
+      <div v-if="hitmarker" style="position:absolute;top:50%;left:50%;width:24px;height:24px;transform:translate(-50%,-50%);">
+        <div :style="{position:'absolute',width:'100%',height:'3px',background:hitmarkerColor,transform:'rotate(45deg)',top:'11px',boxShadow:'0 0 8px '+hitmarkerColor}"></div>
+        <div :style="{position:'absolute',width:'100%',height:'3px',background:hitmarkerColor,transform:'rotate(-45deg)',top:'11px',boxShadow:'0 0 8px '+hitmarkerColor}"></div>
       </div>
+    </div>
+
+    <div v-if="gameState === 'playing' && isAiming && currentWeapon !== 'sniper' && hitmarker" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:20;width:24px;height:24px;">
+      <div :style="{position:'absolute',width:'100%',height:'3px',background:hitmarkerColor,transform:'rotate(45deg)',top:'11px',boxShadow:'0 0 8px '+hitmarkerColor}"></div>
+      <div :style="{position:'absolute',width:'100%',height:'3px',background:hitmarkerColor,transform:'rotate(-45deg)',top:'11px',boxShadow:'0 0 8px '+hitmarkerColor}"></div>
     </div>
 
     <div v-if="showHitDir" style="position:fixed;inset:0;pointer-events:none;z-index:18;">
       <div :style="{position:'absolute',top:'50%',left:'50%',transform:`rotate(${hitDirAngle}rad)`}">
-        <div style="position:absolute;top:-160px;left:-40px;width:80px;height:60px;background:radial-gradient(ellipse at bottom, rgba(255,40,40,0.9), transparent 70%);border-radius:50%;opacity:0.85;"></div>
+        <div style="position:absolute;top:-160px;left:-40px;width:80px;height:60px;background:radial-gradient(ellipse at bottom, rgba(255,0,0,1), transparent 70%);border-radius:50%;opacity:0.9;filter:drop-shadow(0 0 10px red);"></div>
       </div>
     </div>
 
-    <div v-if="isHurt" style="position:fixed;inset:0;background:radial-gradient(circle, transparent 40%, rgba(255,0,0,0.7) 100%);pointer-events:none;z-index:20;"></div>
+    <!-- FIXED: Damage screen is less intrusive -->
+    <div v-if="isHurt" style="position:fixed;inset:0;background:radial-gradient(circle, transparent 50%, rgba(255,0,0,0.6) 100%);pointer-events:none;z-index:20;"></div>
 
     <!-- SHOP -->
-    <div v-if="gameState === 'shop'" style="position:fixed;inset:0;background:rgba(0,0,0,0.9);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;color:#fff;font-family:sans-serif;">
-      <h1 style="font-size:48px;color:#ffd700;margin:0;">WAVE CLEARED</h1>
-      <h2 style="font-size:24px;color:#00ffaa;margin-top:10px;">Scrap: {{ scrap }}</h2>
+    <div v-if="gameState === 'shop'" style="position:fixed;inset:0;background:rgba(0,0,0,0.95);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;color:#fff;font-family:'Courier New', monospace;">
+      <h1 style="font-size:48px;color:#00ffff;text-shadow:0 0 20px #00ffff;margin:0;letter-spacing:4px;">WAVE CLEARED</h1>
+      <h2 style="font-size:24px;color:#ffd700;margin-top:10px;">Scrap Available: {{ scrap }}</h2>
       <div style="display:flex;gap:20px;margin-top:40px;">
-        <div style="background:#222;padding:20px;border-radius:10px;border:2px solid #ff5555;text-align:center;width:200px;">
-          <h3 style="color:#ff5555;margin:0 0 10px 0;">Max HP +20</h3>
-          <p style="font-size:12px;color:#aaa;height:30px;">Current: {{ maxHp }}</p>
-          <button @click="buyUpgrade('hp')" :disabled="scrap < 150" style="width:100%;padding:10px;background:#ff5555;color:#fff;border:none;border-radius:5px;cursor:pointer;font-weight:bold;">150 SCRAP</button>
+        <div style="background:rgba(255,0,85,0.1);padding:20px;border-radius:4px;border:2px solid #ff0055;text-align:center;width:220px;box-shadow:0 0 15px rgba(255,0,85,0.3);">
+          <h3 style="color:#ff0055;margin:0 0 10px 0;">Max HP +20</h3>
+          <p style="font-size:12px;color:#aaa;height:30px;">Current: {{ maxHp }} HP</p>
+          <button @click="buyUpgrade('hp')" :disabled="scrap < 150" style="width:100%;padding:10px;background:#ff0055;color:#fff;border:none;border-radius:2px;cursor:pointer;font-weight:bold;">150 SCRAP</button>
         </div>
-        <div style="background:#222;padding:20px;border-radius:10px;border:2px solid #ffaa00;text-align:center;width:200px;">
+        <div style="background:rgba(255,170,0,0.1);padding:20px;border-radius:4px;border:2px solid #ffaa00;text-align:center;width:220px;box-shadow:0 0 15px rgba(255,170,0,0.3);">
           <h3 style="color:#ffaa00;margin:0 0 10px 0;">Damage +25%</h3>
           <p style="font-size:12px;color:#aaa;height:30px;">Current: {{ (damageMult * 100).toFixed(0) }}%</p>
-          <button @click="buyUpgrade('damage')" :disabled="scrap < 250" style="width:100%;padding:10px;background:#ffaa00;color:#fff;border:none;border-radius:5px;cursor:pointer;font-weight:bold;">250 SCRAP</button>
+          <button @click="buyUpgrade('damage')" :disabled="scrap < 250" style="width:100%;padding:10px;background:#ffaa00;color:#fff;border:none;border-radius:2px;cursor:pointer;font-weight:bold;">250 SCRAP</button>
         </div>
-        <div style="background:#222;padding:20px;border-radius:10px;border:2px solid #00ffcc;text-align:center;width:200px;">
+        <div style="background:rgba(0,255,204,0.1);padding:20px;border-radius:4px;border:2px solid #00ffcc;text-align:center;width:220px;box-shadow:0 0 15px rgba(0,255,204,0.3);">
           <h3 style="color:#00ffcc;margin:0 0 10px 0;">Reload +20%</h3>
           <p style="font-size:12px;color:#aaa;height:30px;">Current: {{ (reloadMult * 100).toFixed(0) }}%</p>
-          <button @click="buyUpgrade('reload')" :disabled="scrap < 200" style="width:100%;padding:10px;background:#00ffcc;color:#000;border:none;border-radius:5px;cursor:pointer;font-weight:bold;">200 SCRAP</button>
+          <button @click="buyUpgrade('reload')" :disabled="scrap < 200" style="width:100%;padding:10px;background:#00ffcc;color:#000;border:none;border-radius:2px;cursor:pointer;font-weight:bold;">200 SCRAP</button>
         </div>
       </div>
-      <button @click="startNextWave" style="margin-top:50px;padding:15px 40px;font-size:24px;font-weight:bold;background:#fff;color:#000;border:none;border-radius:8px;cursor:pointer;">START WAVE {{ wave + 1 }}</button>
+      <button @click="startNextWave" style="margin-top:50px;padding:15px 40px;font-size:24px;font-weight:bold;background:#00ffff;color:#000;border:none;border-radius:2px;cursor:pointer;box-shadow:0 0 20px #00ffff;">START WAVE {{ wave + 1 }}</button>
     </div>
 
-    <div v-if="gameState === 'menu' || gameState === 'paused' || gameState === 'dead'" style="position:fixed;inset:0;background:rgba(0,0,0,0.85);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;color:#fff;font-family:sans-serif;">
-      <h1 v-if="gameState === 'menu'" style="font-size:64px;margin:0;color:#ffaa55;text-shadow:0 0 20px rgba(255,170,85,0.5);letter-spacing:4px;">NEXUS STRIKE</h1>
-      <h1 v-if="gameState === 'paused'" style="font-size:48px;margin:0;">PAUSED</h1>
-      <h1 v-if="gameState === 'dead'" style="font-size:64px;margin:0;color:#ff3333;">YOU DIED</h1>
+    <div v-if="gameState === 'menu' || gameState === 'paused' || gameState === 'dead'" style="position:fixed;inset:0;background:rgba(0,0,0,0.9);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;color:#fff;font-family:'Courier New', monospace;">
+      <h1 v-if="gameState === 'menu'" style="font-size:72px;margin:0;color:#00ffff;text-shadow:0 0 30px #00ffff;letter-spacing:10px;">NEXUS STRIKE</h1>
+      <h1 v-if="gameState === 'paused'" style="font-size:48px;margin:0;color:#00ffff;">PAUSED</h1>
+      <h1 v-if="gameState === 'dead'" style="font-size:64px;margin:0;color:#ff0055;text-shadow:0 0 20px #ff0055;">YOU DIED</h1>
       <p v-if="gameState === 'menu' && highScore > 0" style="color:#ffd700;margin-top:10px;font-size:20px;">HIGH SCORE: {{ highScore }}</p>
       <p v-if="gameState === 'dead' && score >= highScore && score > 0" style="color:#ffd700;margin-top:10px;font-size:20px;">🏆 NEW HIGH SCORE!</p>
       <p v-if="gameState === 'menu'" style="font-size:18px;color:#aaa;margin-top:20px;max-width:420px;text-align:center;line-height:1.6;">
@@ -90,8 +100,8 @@
         Headshots deal 2x damage • Tank weakpoints deal 3x<br>
         Waves are endless — survive as long as you can.
       </p>
-      <button @click="startGame" style="margin-top:40px;padding:15px 40px;font-size:24px;font-weight:bold;background:#ffaa55;color:#000;border:none;border-radius:8px;cursor:pointer;">
-        {{ gameState === 'menu' ? 'CLICK TO PLAY' : gameState === 'dead' ? 'RESPAWN' : 'RESUME' }}
+      <button @click="startGame" style="margin-top:40px;padding:15px 40px;font-size:24px;font-weight:bold;background:#00ffff;color:#000;border:none;border-radius:2px;cursor:pointer;box-shadow:0 0 20px #00ffff;">
+        {{ gameState === 'menu' ? 'INITIALIZE' : gameState === 'dead' ? 'REBOOT' : 'RESUME' }}
       </button>
     </div>
   </div>
@@ -102,7 +112,6 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js'
 
-// --- POST PROCESSING IMPORTS ---
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
@@ -111,6 +120,9 @@ import { RGBShiftShader } from 'three/examples/jsm/shaders/RGBShiftShader.js'
 import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import { WEAPON_CONFIG, weaponAmmo, ENEMY_CONFIG } from '../game/config.js'
+import { CinematicShader } from '../game/shader.js'
+import { initAudio, playSound } from '../game/audio.js'
 
 const root = ref(null)
 const playerHp = ref(100)
@@ -140,101 +152,35 @@ const hitDirAngle = ref(0)
 const showHitDir = ref(false)
 const highScore = ref(parseInt(localStorage.getItem('nexus_highscore') || '0'))
 
-const WEAPON_CONFIG = {
-  pistol:  { maxAmmo: 12, damage: 50,  fireRate: 200,  reloadTime: 1500, color: 0x00ffff, speed: 120, bullets: 1, spread: 0 },
-  shotgun: { maxAmmo: 6,  damage: 25,  fireRate: 800,  reloadTime: 2500, color: 0xffff00, speed: 120, bullets: 5, spread: 0.2 },
-  sniper:  { maxAmmo: 4,  damage: 150, fireRate: 1500, reloadTime: 3000, color: 0xff00ff, speed: 250, bullets: 1, spread: 0 }
-}
-const weaponAmmo = { pistol: 12, shotgun: 6, sniper: 4 }
-
-const ENEMY_CONFIG = {
-  normal:   { hp: 100,   scale: 1.0, speed: 3.5, color: 0xff0000, attackDist: 40,  bulletDmg: 15, bulletColor: 0xff0000, weakPoint: false },
-  runner:   { hp: 50,    scale: 0.8, speed: 7,   color: 0xff5500, attackDist: 15,  bulletDmg: 0,  bulletColor: 0xff5500, weakPoint: false },
-  tank:     { hp: 300,   scale: 1.5, speed: 1.8, color: 0x8800ff, attackDist: 50,  bulletDmg: 15, bulletColor: 0xff0000, weakPoint: true  },
-  sniper:   { hp: 50,    scale: 0.9, speed: 3.5, color: 0xffff00, attackDist: 100, bulletDmg: 30, bulletColor: 0xffff00, weakPoint: false },
-  boss:     { hp: 5000,  scale: 3.5, speed: 1.5, color: 0xff0000, attackDist: 60,  bulletDmg: 20, bulletColor: 0xff00ff, weakPoint: false }
-}
-
 let renderer, frame, onResize, onKeyDown, onKeyUp, onMouseMove, onMouseDown, onMouseUp, onPointerLockChange, onContextMenu
 let scene, camera, miniMapCamera
 let composer, bloomPass, rgbShiftPass, smaaPass, vignettePass, outputPass
 let soldier = null
-let audioCtx = null
 let groundMesh = null
+let explosionLight = null // FIXED: Reusable light for explosions
+let explosionTimer = 0
 
 const playerLasers = [], enemyBullets = [], particles = [], ragdolls = [], lootItems = [], damageNumbers = []
 const keys = {}
-let me = { x: 0, z: 0, ry: 0 }
+const me = { x: 0, z: 0, ry: 0 }
 let verticalVel = 0, isGrounded = true
 
 let gunModel, muzzleLight, muzzleFlash, accentMat, sightGlass
 const HIP_POS = new THREE.Vector3(0.25, -0.22, -0.5)
-const ADS_POS = new THREE.Vector3(0, -0.075, -0.4)
+const ADS_POS = new THREE.Vector3(0, -0.115, -0.35)
 
-let gunCurrentPos = HIP_POS.clone()
-let gunRot = new THREE.Vector3(0, 0, 0)
-let gunSway = new THREE.Vector3(0, 0, 0)
+const gunCurrentPos = HIP_POS.clone()
+const gunRot = new THREE.Vector3(0, 0, 0)
+const gunSway = new THREE.Vector3(0, 0, 0)
 let moveBobTime = 0, currentMoveAmount = 0, lastShootTime = 0, cameraShake = 0
 let landingKick = 0, fovKick = 0
 
 const obstacles = [], barrels = []
 let enemies = []
-let groundRaycaster = new THREE.Raycaster()
+const groundRaycaster = new THREE.Raycaster()
 
 let hurtTimer = null, hitmarkerTimer = null, hitDirTimer = null, announceTimer = null
 let reloadToken = 0
-
-// --- CLEAN VIGNETTE SHADER (No Grain) ---
-const CinematicShader = {
-  uniforms: {
-    tDiffuse: { value: null },
-    intensity: { value: 1.0 }
-  },
-  vertexShader: `
-    varying vec2 vUv;
-    void main() {
-      vUv = uv;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    }
-  `,
-  fragmentShader: `
-    uniform sampler2D tDiffuse;
-    uniform float intensity;
-    varying vec2 vUv;
-
-    void main() {
-      vec4 color = texture2D(tDiffuse, vUv);
-      
-      // Soft vignette (darkens corners slightly)
-      float dist = distance(vUv, vec2(0.5));
-      float vignette = smoothstep(0.9, 0.3, dist);
-      color.rgb *= mix(1.0, vignette, intensity * 0.6);
-
-      gl_FragColor = color;
-    }
-  `
-}
-
-function initAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === 'suspended') audioCtx.resume() }
-function playSound(type) {
-  if (!audioCtx) return
-  const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain()
-  osc.connect(gain); gain.connect(audioCtx.destination)
-  const now = audioCtx.currentTime
-  if (type === 'pistol') { osc.type='square'; osc.frequency.setValueAtTime(800,now); osc.frequency.exponentialRampToValueAtTime(100,now+0.1); gain.gain.setValueAtTime(0.1,now); gain.gain.exponentialRampToValueAtTime(0.01,now+0.1); osc.start(now); osc.stop(now+0.1) }
-  else if (type === 'shotgun') { osc.type='sawtooth'; osc.frequency.setValueAtTime(300,now); osc.frequency.exponentialRampToValueAtTime(40,now+0.3); gain.gain.setValueAtTime(0.3,now); gain.gain.exponentialRampToValueAtTime(0.01,now+0.3); osc.start(now); osc.stop(now+0.3) }
-  else if (type === 'sniper') { osc.type='sawtooth'; osc.frequency.setValueAtTime(1500,now); osc.frequency.exponentialRampToValueAtTime(50,now+0.4); gain.gain.setValueAtTime(0.4,now); gain.gain.exponentialRampToValueAtTime(0.01,now+0.4); osc.start(now); osc.stop(now+0.4) }
-  else if (type === 'hit') { osc.type='sine'; osc.frequency.setValueAtTime(1200,now); osc.frequency.exponentialRampToValueAtTime(2000,now+0.05); gain.gain.setValueAtTime(0.1,now); gain.gain.exponentialRampToValueAtTime(0.01,now+0.05); osc.start(now); osc.stop(now+0.05) }
-  else if (type === 'headshot') { osc.type='square'; osc.frequency.setValueAtTime(2000,now); osc.frequency.exponentialRampToValueAtTime(3500,now+0.1); gain.gain.setValueAtTime(0.15,now); gain.gain.exponentialRampToValueAtTime(0.01,now+0.12); osc.start(now); osc.stop(now+0.12) }
-  else if (type === 'hurt') { osc.type='triangle'; osc.frequency.setValueAtTime(200,now); osc.frequency.linearRampToValueAtTime(50,now+0.2); gain.gain.setValueAtTime(0.3,now); gain.gain.exponentialRampToValueAtTime(0.01,now+0.2); osc.start(now); osc.stop(now+0.2) }
-  else if (type === 'explosion') { osc.type='sawtooth'; osc.frequency.setValueAtTime(100,now); osc.frequency.linearRampToValueAtTime(10,now+0.8); gain.gain.setValueAtTime(0.6,now); gain.gain.exponentialRampToValueAtTime(0.01,now+0.8); osc.start(now); osc.stop(now+0.8) }
-  else if (type === 'heal') { osc.type='sine'; osc.frequency.setValueAtTime(400,now); osc.frequency.linearRampToValueAtTime(800,now+0.2); gain.gain.setValueAtTime(0.2,now); gain.gain.exponentialRampToValueAtTime(0.01,now+0.3); osc.start(now); osc.stop(now+0.3) }
-  else if (type === 'empty') { osc.type='square'; osc.frequency.setValueAtTime(200,now); gain.gain.setValueAtTime(0.05,now); gain.gain.exponentialRampToValueAtTime(0.01,now+0.05); osc.start(now); osc.stop(now+0.05) }
-  else if (type === 'reload') { osc.type='triangle'; osc.frequency.setValueAtTime(300,now); osc.frequency.linearRampToValueAtTime(600,now+0.3); gain.gain.setValueAtTime(0.1,now); gain.gain.exponentialRampToValueAtTime(0.01,now+0.3); osc.start(now); osc.stop(now+0.3) }
-  else if (type === 'loot') { osc.type='sine'; osc.frequency.setValueAtTime(600,now); osc.frequency.linearRampToValueAtTime(1200,now+0.1); gain.gain.setValueAtTime(0.2,now); gain.gain.exponentialRampToValueAtTime(0.01,now+0.1); osc.start(now); osc.stop(now+0.1) }
-  else if (type === 'combo') { osc.type='triangle'; osc.frequency.setValueAtTime(600,now); osc.frequency.linearRampToValueAtTime(1400,now+0.15); gain.gain.setValueAtTime(0.15,now); gain.gain.exponentialRampToValueAtTime(0.01,now+0.2); osc.start(now); osc.stop(now+0.2) }
-  else if (type === 'boing') { osc.type = 'sine'; osc.frequency.setValueAtTime(600, now); osc.frequency.exponentialRampToValueAtTime(150, now + 0.3); gain.gain.setValueAtTime(0.15, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3); osc.start(now); osc.stop(now + 0.3) }
-}
 
 function spawnDamageNumber(pos, damage, color = '#ff5555', scale = 1) {
   const canvas = document.createElement('canvas')
@@ -295,7 +241,7 @@ function damagePlayer(amount, sx, sz) {
   playerHp.value -= amount
   triggerHurt(); triggerHitDirection(sx, sz)
   cameraShake = Math.max(cameraShake, 0.15)
-  rgbShiftPass.uniforms['amount'].value = 0.015
+  rgbShiftPass.uniforms['amount'].value = 0.005 // FIXED: Much lower RGB shift
   playSound('hurt')
   if (comboCount.value > 1) { comboCount.value = 1; addKillFeed('💔 Combo Broken') }
   if (playerHp.value <= 0) checkDeath()
@@ -348,14 +294,14 @@ function shoot() {
   currentAmmo.value--
   weaponAmmo[currentWeapon.value] = currentAmmo.value
   const isCrit = overchargeTimer.value > 0
-  let damage = cfg.damage * damageMult.value * (isCrit ? 2 : 1)
+  const damage = cfg.damage * damageMult.value * (isCrit ? 2 : 1) // FIXED: let -> const
 
   const dir = new THREE.Vector3(); camera.getWorldDirection(dir)
 
   for (let i = 0; i < cfg.bullets; i++) {
     const shootDir = dir.clone()
     if (cfg.spread > 0) {
-      const spread = isAiming.value ? cfg.spread * 0.25 : cfg.spread
+      const spread = isAiming.value ? cfg.spread * 0.1 : cfg.spread
       shootDir.x += (Math.random() - 0.5) * spread
       shootDir.y += (Math.random() - 0.5) * spread
       shootDir.z += (Math.random() - 0.5) * spread
@@ -372,7 +318,9 @@ function shoot() {
   }
 
   playSound(currentWeapon.value)
-  muzzleLight.intensity = currentWeapon.value === 'shotgun' ? 4 : currentWeapon.value === 'sniper' ? 5 : 2
+  
+  // FIXED: Much lower intensity
+  muzzleLight.intensity = currentWeapon.value === 'shotgun' ? 1 : currentWeapon.value === 'sniper' ? 1.5 : 0.5
   if (muzzleFlash) { muzzleFlash.visible = true; muzzleFlash.material.color.setHex(cfg.color) }
   setTimeout(() => { muzzleLight.intensity = 0; if (muzzleFlash) muzzleFlash.visible = false }, 50)
 
@@ -441,9 +389,12 @@ function killEnemy(enemy, isHeadshot = false) {
 function explode(x, z) {
   playSound('explosion')
   const pos = new THREE.Vector3(x, 2, z)
-  const flash = new THREE.PointLight(0xff5500, 50, 30)
-  flash.position.copy(pos); scene.add(flash)
-  setTimeout(() => scene.remove(flash), 150)
+  
+  // FIXED: Reuse the explosion light instead of creating a new one
+  explosionLight.position.copy(pos)
+  explosionLight.intensity = 15 // Much lower intensity
+  explosionTimer = 0.15 // Turn off after 150ms
+
   spawnParticles(pos, 0xffaa00, 20)
   cameraShake = 0.3
   for (const e of enemies) {
@@ -521,9 +472,8 @@ function checkDeath() {
 onMounted(() => {
   scene = new THREE.Scene()
   
-  // DARKER, MORE REALISTIC SKY
-  scene.background = new THREE.Color(0x77aaff)
-  scene.fog = new THREE.Fog(0x77aaff, 60, 250)
+  scene.background = new THREE.Color(0x050510)
+  scene.fog = new THREE.FogExp2(0x050510, 0.008) 
 
   camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 1000)
   camera.rotation.order = 'YXZ'
@@ -531,9 +481,9 @@ onMounted(() => {
   renderer = new THREE.WebGLRenderer({ antialias: false }) 
   renderer.setSize(innerWidth, innerHeight)
   renderer.shadowMap.enabled = true
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap
+  renderer.shadowMap.type = THREE.PCFShadowMap 
   renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = 1.0
+  renderer.toneMappingExposure = 0.9 
   
   root.value.appendChild(renderer.domElement)
   renderer.domElement.style.cursor = 'crosshair'
@@ -545,37 +495,37 @@ onMounted(() => {
   composer = new EffectComposer(renderer)
   composer.addPass(new RenderPass(scene, camera))
   
-  // 1. Bloom (Subtle)
-  bloomPass = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.3, 0.4, 0.85)
+  // 1. Bloom (Toned way down)
+  bloomPass = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.35, 0.4, 0.8)
   bloomPass.threshold = 0.8
-  bloomPass.strength = 0.3
+  bloomPass.strength = 0.35
   bloomPass.radius = 0.4
   composer.addPass(bloomPass)
   
-  // 2. RGB Shift (Damage effect)
+  // 2. RGB Shift
   rgbShiftPass = new ShaderPass(RGBShiftShader)
   rgbShiftPass.uniforms['amount'].value = 0.0
   composer.addPass(rgbShiftPass)
 
-  // 3. Cinematic Vignette (No Grain)
+  // 3. Cinematic Vignette
   vignettePass = new ShaderPass(CinematicShader)
   vignettePass.uniforms['intensity'].value = 1.0
   composer.addPass(vignettePass)
 
-  // 4. SMAA (Anti-aliasing)
+  // 4. SMAA
   smaaPass = new SMAAPass(innerWidth * renderer.getPixelRatio(), innerHeight * renderer.getPixelRatio())
   composer.addPass(smaaPass)
 
-  // 5. Output Pass (Fixes the washed-out colors)
+  // 5. Output Pass
   outputPass = new OutputPass()
   composer.addPass(outputPass)
 
-  // ===== LIGHTING (Balanced) =====
-  const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6) // Reduced to add contrast
+  // ===== LIGHTING =====
+  const hemiLight = new THREE.HemisphereLight(0x223344, 0x000000, 0.2) 
   hemiLight.position.set(0, 200, 0)
   scene.add(hemiLight)
 
-  const dirLight = new THREE.DirectionalLight(0xffffee, 1.8) 
+  const dirLight = new THREE.DirectionalLight(0x4466ff, 0.8) 
   dirLight.position.set(100, 150, 100)
   dirLight.castShadow = true
   dirLight.shadow.camera.top = 100
@@ -587,56 +537,73 @@ onMounted(() => {
   dirLight.shadow.bias = -0.0005 
   scene.add(dirLight)
 
+  // FIXED: Reusable explosion light (starts off)
+  explosionLight = new THREE.PointLight(0xff5500, 0, 30)
+  scene.add(explosionLight)
+
   // Ground
   const groundGeo = new THREE.PlaneGeometry(400, 400)
-  const groundMat = new THREE.MeshStandardMaterial({ color: 0x4a6b4a, roughness: 0.9, metalness: 0.1 })
+  const groundMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.4, metalness: 0.8 })
   groundMesh = new THREE.Mesh(groundGeo, groundMat)
   groundMesh.rotation.x = -Math.PI / 2
   groundMesh.receiveShadow = true
   scene.add(groundMesh)
   
-  // Grid overlay for the ground so it's not a flat blob
-  const grid = new THREE.GridHelper(400, 100, 0x2a3a2a, 0x2a3a2a)
+  const grid = new THREE.GridHelper(400, 100, 0x00ffff, 0x003366)
   grid.position.y = 0.01
+  grid.material.opacity = 0.2
+  grid.material.transparent = true
   scene.add(grid)
 
-  // Trees
-  const treeTrunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3025, roughness: 1 })
-  const treeLeavesMat = new THREE.MeshStandardMaterial({ color: 0x2e8b57, roughness: 0.8 })
+  // Glowing Pillars
   for (let i = 0; i < 40; i++) {
-    const tree = new THREE.Group()
-    const height = 3 + Math.random() * 3
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.5, height, 8), treeTrunkMat)
-    trunk.position.y = height / 2
-    trunk.castShadow = true; trunk.receiveShadow = true
-    tree.add(trunk)
-    const leaves = new THREE.Mesh(new THREE.ConeGeometry(2, 4, 8), treeLeavesMat)
-    leaves.position.y = height + 1
-    leaves.castShadow = true; leaves.receiveShadow = true
-    tree.add(leaves)
+    const isCyan = Math.random() > 0.5
+    const color = isCyan ? 0x00ffff : 0xff00ff
+    const pillar = new THREE.Group()
+    const h = 4 + Math.random() * 6
+    
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.8, h, 6), new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.9, roughness: 0.2 }))
+    base.position.y = h / 2; base.castShadow = true; base.receiveShadow = true
+    pillar.add(base)
+    
+    const lightStrip = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.82, 0.2, 6), new THREE.MeshStandardMaterial({ color: color, emissive: color, emissiveIntensity: 1.0 }))
+    lightStrip.position.y = h / 2
+    pillar.add(lightStrip)
+
+    const pl = new THREE.PointLight(color, 2, 10) 
+    pl.position.y = h / 2
+    pillar.add(pl)
+
     let x, z
     do { x = (Math.random() - 0.5) * 300; z = (Math.random() - 0.5) * 300 } while (Math.abs(x) < 15 && Math.abs(z) < 15)
-    tree.position.set(x, 0, z)
-    scene.add(tree)
-    obstacles.push(tree)
+    pillar.position.set(x, 0, z)
+    scene.add(pillar)
+    obstacles.push(pillar)
   }
 
-  // Crates and Walls
-  const crateMat = new THREE.MeshStandardMaterial({ color: 0x8b5a2b, roughness: 0.9 })
-  const wallMat = new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.8 })
+  // Crates
+  const crateMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.7, roughness: 0.5 })
+  const neonMat = new THREE.MeshStandardMaterial({ color: 0xffaa00, emissive: 0xffaa00, emissiveIntensity: 1 })
   for (let i = 0; i < 30; i++) {
     const w = 2 + Math.random() * 4
     const h = 2 + Math.random() * 4
     const d = 2 + Math.random() * 4
-    const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), Math.random() > 0.5 ? crateMat : wallMat)
+    const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), crateMat)
     box.position.set((Math.random() - 0.5) * 200, h / 2, (Math.random() - 0.5) * 200)
     box.castShadow = true; box.receiveShadow = true
     scene.add(box)
     obstacles.push(box)
+
+    if (Math.random() > 0.6) {
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(w * 1.02, 0.1, d * 1.02), neonMat)
+      strip.position.copy(box.position)
+      strip.position.y = h * 0.8
+      scene.add(strip)
+    }
   }
 
   // Rocks
-  const rockMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 1 })
+  const rockMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, metalness: 0.9, roughness: 0.4 })
   for (let i = 0; i < 20; i++) {
     const size = 1 + Math.random() * 3
     const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(size), rockMat)
@@ -647,9 +614,10 @@ onMounted(() => {
     obstacles.push(rock)
   }
 
-  // ===== BARRELS =====
+  // Barrels
   for (let i = 0; i < 15; i++) {
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 1.5, 16), new THREE.MeshStandardMaterial({ color: 0xcc0000, emissive: 0x330000, roughness: 0.4, metalness: 0.6 }))
+    const barrelMat = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0x880000, emissiveIntensity: 1.0, metalness: 0.5, roughness: 0.3 })
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 1.5, 16), barrelMat)
     barrel.position.set((Math.random() - 0.5) * 160, 0.75, (Math.random() - 0.5) * 160)
     barrel.castShadow = true; scene.add(barrel); barrels.push(barrel)
   }
@@ -659,66 +627,63 @@ onMounted(() => {
 
   // ===== PLAYER GUN =====
   gunModel = new THREE.Group()
-  const matBlack = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, metalness: 0.9, roughness: 0.4 })
-  const matDarkGrey = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.7, roughness: 0.6 })
-  const matPolymer = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.1, roughness: 0.8 })
-  accentMat = new THREE.MeshStandardMaterial({ color: 0x00ffcc, emissive: 0x00ffcc, emissiveIntensity: 0.8 })
-
-  const upperReceiver = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.45), matBlack)
+  
+  const matBody = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.9, roughness: 0.2 })
+  accentMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 1.0 })
+  
+  const upperReceiver = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.45), matBody)
   upperReceiver.position.set(0, 0.02, -0.15); gunModel.add(upperReceiver)
   
-  const lowerReceiver = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.06, 0.25), matBlack)
+  const lowerReceiver = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.06, 0.25), matBody)
   lowerReceiver.position.set(0, -0.03, -0.1); gunModel.add(lowerReceiver)
 
-  const handguard = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.3), matDarkGrey)
+  const handguard = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.3), matBody)
   handguard.position.set(0, 0.02, -0.45); gunModel.add(handguard)
 
-  const railTop = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.015, 0.3), matBlack)
-  railTop.position.set(0, 0.075, -0.45); gunModel.add(railTop)
-
-  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.35, 12), matBlack)
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.015, 0.35, 12), matBody)
   barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.02, -0.75); gunModel.add(barrel)
 
-  const muzzleBrake = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.06, 12), matDarkGrey)
+  const muzzleBrake = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.06, 12), matBody)
   muzzleBrake.rotation.x = Math.PI / 2; muzzleBrake.position.set(0, 0.02, -0.92); gunModel.add(muzzleBrake)
 
-  const mag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.18, 0.08), matPolymer)
+  const mag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.18, 0.08), matBody)
   mag.position.set(0, -0.14, -0.15); mag.rotation.x = -0.25; gunModel.add(mag)
 
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.15, 0.08), matPolymer)
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.15, 0.08), matBody)
   grip.position.set(0, -0.12, 0.02); grip.rotation.x = 0.3; gunModel.add(grip)
 
-  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.2), matPolymer)
+  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.2), matBody)
   stock.position.set(0, -0.02, 0.2); gunModel.add(stock)
-
-  const sightBase = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.02, 0.1), matBlack)
-  sightBase.position.set(0, 0.08, -0.15); gunModel.add(sightBase)
-
-  const sightTube = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.12, 16, 1, true), matBlack)
-  sightTube.rotation.x = Math.PI / 2; sightTube.position.set(0, 0.115, -0.15); gunModel.add(sightTube)
-
-  sightGlass = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 0.06), new THREE.MeshBasicMaterial({ color: 0x00ccff, transparent: true, opacity: 0.15, side: THREE.DoubleSide }))
-  sightGlass.position.set(0, 0.115, -0.2); gunModel.add(sightGlass)
-
-  const redDot = new THREE.Mesh(new THREE.SphereGeometry(0.002, 8, 8), accentMat)
-  redDot.position.set(0, 0.115, -0.19); gunModel.add(redDot)
 
   const accentLine = new THREE.Mesh(new THREE.BoxGeometry(0.082, 0.01, 0.15), accentMat)
   accentLine.position.set(0, -0.01, -0.35); gunModel.add(accentLine)
 
+  const accentMag = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.02, 0.08), accentMat)
+  accentMag.position.set(0, -0.22, -0.15); accentMag.rotation.x = -0.25; gunModel.add(accentMag)
+
+  const sightBase = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.02, 0.1), matBody)
+  sightBase.position.set(0, 0.08, -0.15); gunModel.add(sightBase)
+
+  const sightTube = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.12, 16, 1, true), matBody)
+  sightTube.rotation.x = Math.PI / 2; sightTube.position.set(0, 0.115, -0.15); gunModel.add(sightTube)
+
+  sightGlass = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 0.06), new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.3, side: THREE.DoubleSide }))
+  sightGlass.position.set(0, 0.115, -0.2); gunModel.add(sightGlass)
+
+  const redDot = new THREE.Mesh(new THREE.SphereGeometry(0.004, 8, 8), new THREE.MeshBasicMaterial({ color: 0xff0000 }))
+  redDot.position.set(0, 0.115, -0.19); gunModel.add(redDot)
+
   gunModel.position.copy(gunCurrentPos)
   gunModel.scale.set(0.6, 0.6, 0.6)
   
-  const gunLight = new THREE.PointLight(0xffffff, 0.8, 5) // Dimmed slightly
-  gunLight.position.set(0.2, 0.2, 0.5); camera.add(gunLight)
-  
   camera.add(gunModel)
 
-  muzzleFlash = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }))
-  muzzleFlash.position.set(0, 0.02, -0.95); muzzleFlash.visible = false; gunModel.add(muzzleFlash)
+  // FIXED: Much smaller muzzle flash, further away
+  muzzleFlash = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 0.05), new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }))
+  muzzleFlash.position.set(0, 0.02, -1.1); muzzleFlash.visible = false; gunModel.add(muzzleFlash)
 
-  muzzleLight = new THREE.PointLight(0x00ffff, 0, 10)
-  muzzleLight.position.set(0, 0.02, -0.95); gunModel.add(muzzleLight)
+  muzzleLight = new THREE.PointLight(0x00ffff, 0, 5)
+  muzzleLight.position.set(0, 0.02, -1.1); gunModel.add(muzzleLight)
   scene.add(camera)
 
   new GLTFLoader().load('/models/Soldier.glb', (gltf) => { soldier = gltf }, undefined, (err) => console.error('Model failed', err))
@@ -736,9 +701,10 @@ onMounted(() => {
       isReloading.value = false
       reloadToken++
       
-      const colors = { pistol: 0x00ffcc, shotgun: 0xffff00, sniper: 0xff00ff }
+      const colors = { pistol: 0x00ffff, shotgun: 0xffff00, sniper: 0xff00ff }
       accentMat.color.setHex(colors[name])
       accentMat.emissive.setHex(colors[name])
+      sightGlass.material.color.setHex(colors[name])
       
       if (name === 'shotgun') { gunModel.scale.set(0.7, 0.65, 0.6) }
       else if (name === 'sniper') { gunModel.scale.set(0.5, 0.5, 0.9) }
@@ -785,12 +751,18 @@ onMounted(() => {
     const now = performance.now()
     const dt = Math.min((now - lastTime) / 1000, 0.1)
     lastTime = now
+
+    // FIXED: Manage explosion light timer here
+    if (explosionTimer > 0) {
+      explosionTimer -= dt
+      if (explosionTimer <= 0) explosionLight.intensity = 0
+    }
     
     if (gameState.value === 'playing') {
       updatePlayer(dt)
       updateCombat(dt)
       updateAI(dt)
-      updateRenderables(dt, now)
+      updateRenderables(dt)
     }
     
     composer.render()
@@ -817,7 +789,7 @@ onMounted(() => {
     if (overchargeTimer.value > 0) { overchargeTimer.value -= dt; if (overchargeTimer.value < 0) overchargeTimer.value = 0 }
     
     fovKick = THREE.MathUtils.lerp(fovKick, 0, dt * 10)
-    const baseFov = isAiming.value ? (currentWeapon.value === 'sniper' ? 30 : 50) : 70
+    const baseFov = isAiming.value ? (currentWeapon.value === 'sniper' ? 20 : 50) : 70
     camera.fov += (baseFov - camera.fov) * dt * 15
     camera.fov += fovKick
     camera.updateProjectionMatrix()
@@ -857,7 +829,7 @@ onMounted(() => {
 
     let nextX = me.x, nextZ = me.z
     const sprint = (keys.ShiftLeft || keys.ShiftRight) ? 1.8 : 1.0
-    const speed = (isAiming.value ? 3 : 6) * sprint
+    const speed = (isAiming.value ? 2.5 : 6) * sprint
     if (keys.KeyW) { nextX -= Math.sin(me.ry) * speed * dt; nextZ -= Math.cos(me.ry) * speed * dt }
     if (keys.KeyS) { nextX += Math.sin(me.ry) * speed * dt; nextZ += Math.cos(me.ry) * speed * dt }
     if (keys.KeyA) { nextX -= Math.cos(me.ry) * speed * dt; nextZ += Math.sin(me.ry) * speed * dt }
@@ -1223,7 +1195,7 @@ onMounted(() => {
     scene.add(eb); enemyBullets.push(eb)
   }
 
-  function updateRenderables(dt, now) {
+  function updateRenderables(dt) {
     const activeIds = new Set()
     for (const e of enemies) {
       if (e.dead) continue
