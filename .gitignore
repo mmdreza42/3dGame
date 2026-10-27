@@ -22,3 +22,10 @@ logs
 .env
 .env.*
 !.env.example
+# Ignore large source model files
+public/*.blend
+public/*.blend1
+public/*.fbx
+public/*.mb
+public/*.obj
+public/Sniper_1A/
