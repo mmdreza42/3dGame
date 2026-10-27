@@ -337,7 +337,7 @@ function killEnemy(enemy, isHeadshot = false) {
   if (!mesh) return
   if (mesh.userData.mixer) mesh.userData.mixer.stopAllAction()
   
-  const isCartoon = (enemy.type === 'normal' || enemy.type === 'runner')
+  const isCartoon = enemy.type !== 'boss'
 
   if (isCartoon) {
     ragdolls.push({
@@ -392,7 +392,7 @@ function explode(x, z) {
   
   // FIXED: Reuse the explosion light instead of creating a new one
   explosionLight.position.copy(pos)
-  explosionLight.intensity = 15 // Much lower intensity
+  explosionLight.intensity = 4
   explosionTimer = 0.15 // Turn off after 150ms
 
   spawnParticles(pos, 0xffaa00, 20)
@@ -490,6 +490,7 @@ onMounted(() => {
 
   const pmremGenerator = new THREE.PMREMGenerator(renderer)
   scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture
+  scene.environmentIntensity = 0.5
 
   // --- SETUP POST PROCESSING PIPELINE ---
   composer = new EffectComposer(renderer)
@@ -497,8 +498,8 @@ onMounted(() => {
   
   // 1. Bloom (Toned way down)
   bloomPass = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.35, 0.4, 0.8)
-  bloomPass.threshold = 0.8
-  bloomPass.strength = 0.35
+  bloomPass.threshold = 1.0
+  bloomPass.strength = 0.3
   bloomPass.radius = 0.4
   composer.addPass(bloomPass)
   
@@ -532,8 +533,8 @@ onMounted(() => {
   dirLight.shadow.camera.bottom = -100
   dirLight.shadow.camera.left = -100
   dirLight.shadow.camera.right = 100
-  dirLight.shadow.mapSize.width = 2048
-  dirLight.shadow.mapSize.height = 2048
+  dirLight.shadow.mapSize.width = 1024
+  dirLight.shadow.mapSize.height = 1024
   dirLight.shadow.bias = -0.0005 
   scene.add(dirLight)
 
@@ -543,7 +544,7 @@ onMounted(() => {
 
   // Ground
   const groundGeo = new THREE.PlaneGeometry(400, 400)
-  const groundMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.4, metalness: 0.8 })
+  const groundMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.7, metalness: 0.3 })
   groundMesh = new THREE.Mesh(groundGeo, groundMat)
   groundMesh.rotation.x = -Math.PI / 2
   groundMesh.receiveShadow = true
@@ -566,13 +567,13 @@ onMounted(() => {
     base.position.y = h / 2; base.castShadow = true; base.receiveShadow = true
     pillar.add(base)
     
-    const lightStrip = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.82, 0.2, 6), new THREE.MeshStandardMaterial({ color: color, emissive: color, emissiveIntensity: 1.0 }))
+    const lightStrip = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.82, 0.2, 6), new THREE.MeshStandardMaterial({ color: color, emissive: color, emissiveIntensity: 2.5 }))
     lightStrip.position.y = h / 2
     pillar.add(lightStrip)
 
-    const pl = new THREE.PointLight(color, 2, 10) 
-    pl.position.y = h / 2
-    pillar.add(pl)
+    // pillar point lights removed: emissive strip + bloom instead 
+    
+    
 
     let x, z
     do { x = (Math.random() - 0.5) * 300; z = (Math.random() - 0.5) * 300 } while (Math.abs(x) < 15 && Math.abs(z) < 15)
@@ -589,7 +590,9 @@ onMounted(() => {
     const h = 2 + Math.random() * 4
     const d = 2 + Math.random() * 4
     const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), crateMat)
-    box.position.set((Math.random() - 0.5) * 200, h / 2, (Math.random() - 0.5) * 200)
+    let bx, bz
+    do { bx = (Math.random() - 0.5) * 200; bz = (Math.random() - 0.5) * 200 } while (Math.abs(bx) < 14 && Math.abs(bz) < 14)
+    box.position.set(bx, h / 2, bz)
     box.castShadow = true; box.receiveShadow = true
     scene.add(box)
     obstacles.push(box)
@@ -607,7 +610,9 @@ onMounted(() => {
   for (let i = 0; i < 20; i++) {
     const size = 1 + Math.random() * 3
     const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(size), rockMat)
-    rock.position.set((Math.random() - 0.5) * 250, size / 2, (Math.random() - 0.5) * 250)
+    let rx, rz
+    do { rx = (Math.random() - 0.5) * 250; rz = (Math.random() - 0.5) * 250 } while (Math.abs(rx) < 14 && Math.abs(rz) < 14)
+    rock.position.set(rx, size / 2, rz)
     rock.rotation.set(Math.random(), Math.random(), Math.random())
     rock.castShadow = true; rock.receiveShadow = true
     scene.add(rock)
@@ -755,7 +760,7 @@ onMounted(() => {
     // FIXED: Manage explosion light timer here
     if (explosionTimer > 0) {
       explosionTimer -= dt
-      if (explosionTimer <= 0) explosionLight.intensity = 0
+      explosionLight.intensity = Math.max(0, explosionTimer / 0.15) * 4
     }
     
     if (gameState.value === 'playing') {
@@ -837,7 +842,7 @@ onMounted(() => {
 
     const checkCollision = (nx, nz) => {
       if (nx < -99.5 || nx > 99.5 || nz < -99.5 || nz > 99.5) return true
-      for (const obs of obstacles) { const b = new THREE.Box3().setFromObject(obs); b.expandByScalar(0.5); if (b.containsPoint(new THREE.Vector3(nx, 1.0, nz))) return true }
+      for (const obs of obstacles) { const b = (obs.userData.boxP ||= new THREE.Box3().setFromObject(obs).expandByScalar(0.5)); if (b.containsPoint(new THREE.Vector3(nx, 1.0, nz))) return true }
       return false
     }
     if (!checkCollision(nextX, me.z)) me.x = nextX
@@ -1158,7 +1163,7 @@ onMounted(() => {
 
       let canX = true, canZ = true
       for (const obs of obstacles) {
-        const b = new THREE.Box3().setFromObject(obs)
+        const b = (obs.userData.boxE ||= new THREE.Box3().setFromObject(obs))
         if (b.containsPoint(new THREE.Vector3(e.x + moveX, 1, e.z))) canX = false
         if (b.containsPoint(new THREE.Vector3(e.x, 1, e.z + moveZ))) canZ = false
       }
@@ -1283,7 +1288,7 @@ onMounted(() => {
       m.add(weak)
     }
 
-    if (e.type === 'boss') m.add(new THREE.PointLight(0xff0000, 8, 25))
+    if (e.type === 'boss') tag.scale.setScalar(2.5)
     return m
   }
 
