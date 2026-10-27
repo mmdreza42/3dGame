@@ -110,7 +110,6 @@
 <script setup>
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js'
 
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
@@ -123,6 +122,8 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { WEAPON_CONFIG, weaponAmmo, ENEMY_CONFIG } from '../game/config.js'
 import { CinematicShader } from '../game/shader.js'
 import { initAudio, playSound } from '../game/audio.js'
+import { buildWorld } from '../game/world.js'
+import { enemyExtras, buildEnemyMesh, updateEnemyVisuals, hideEnemyExtras } from '../game/enemies.js'
 
 const root = ref(null)
 const playerHp = ref(100)
@@ -156,6 +157,7 @@ let renderer, frame, onResize, onKeyDown, onKeyUp, onMouseMove, onMouseDown, onM
 let scene, camera, miniMapCamera
 let composer, bloomPass, rgbShiftPass, smaaPass, vignettePass, outputPass
 let soldier = null
+let world = null
 let groundMesh = null
 let explosionLight = null // FIXED: Reusable light for explosions
 let explosionTimer = 0
@@ -307,9 +309,9 @@ function shoot() {
       shootDir.z += (Math.random() - 0.5) * spread
       shootDir.normalize()
     }
-    const laserGeo = new THREE.CylinderGeometry(0.05, 0.05, 2, 8)
+    const laserGeo = new THREE.CylinderGeometry(0.02, 0.02, 3, 6)
     laserGeo.rotateX(Math.PI / 2)
-    const laserMat = new THREE.MeshBasicMaterial({ color: cfg.color, transparent: true, opacity: 0.9 })
+    const laserMat = new THREE.MeshBasicMaterial({ color: 0xffd890, transparent: true, opacity: 0.8 })
     const laser = new THREE.Mesh(laserGeo, laserMat)
     laser.position.copy(camera.position).add(shootDir.clone().multiplyScalar(1))
     laser.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), shootDir)
@@ -321,7 +323,7 @@ function shoot() {
   
   // FIXED: Much lower intensity
   muzzleLight.intensity = currentWeapon.value === 'shotgun' ? 1 : currentWeapon.value === 'sniper' ? 1.5 : 0.5
-  if (muzzleFlash) { muzzleFlash.visible = true; muzzleFlash.material.color.setHex(cfg.color) }
+  if (muzzleFlash) { muzzleFlash.visible = true; muzzleFlash.material.color.setHex(0xffc060) }
   setTimeout(() => { muzzleLight.intensity = 0; if (muzzleFlash) muzzleFlash.visible = false }, 50)
 
   const recoil = currentWeapon.value === 'sniper' ? 0.4 : currentWeapon.value === 'shotgun' ? 0.25 : 0.1
@@ -336,6 +338,7 @@ function killEnemy(enemy, isHeadshot = false) {
   const mesh = scene.getObjectByName(enemy.id)
   if (!mesh) return
   if (mesh.userData.mixer) mesh.userData.mixer.stopAllAction()
+  hideEnemyExtras(mesh)
   
   const isCartoon = enemy.type !== 'boss'
 
@@ -358,7 +361,7 @@ function killEnemy(enemy, isHeadshot = false) {
 
   if (enemy.type === 'boss') { spawnParticles(mesh.position, 0xffaa00, 40); cameraShake = 0.6 }
   
-  const names = { normal: 'Soldier', runner: 'Runner', tank: 'Tank', sniper: 'Sniper', boss: 'BOSS' }
+  const names = { normal: 'Soldier', runner: 'Runner', tank: 'Tank', sniper: 'Sniper', bomber: 'Bomber', elite: 'Elite', boss: 'BOSS' }
   const comboTag = comboCount.value > 1 ? ` [x${comboCount.value}]` : ''
   const hsTag = isHeadshot ? ' 🎯' : ''
   addKillFeed(`☠ ${names[enemy.type]}${hsTag}${comboTag}`)
@@ -426,6 +429,36 @@ function startGame() {
   }
 }
 
+const _tv = new THREE.Vector3()
+const _eb = new THREE.Box3()
+
+function isBlocked(x, z, margin = 0, y = 1) {
+  _tv.set(x, y, z)
+  for (const obs of obstacles) {
+    const b = (obs.userData.boxE ||= new THREE.Box3().setFromObject(obs))
+    if (margin > 0 ? b.distanceToPoint(_tv) < margin : b.containsPoint(_tv)) return true
+  }
+  return false
+}
+
+function pathBlocked(x0, y0, z0, x1, y1, z1) {
+  const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 0.5))
+  for (let i = 1; i <= n; i++) {
+    const t = i / n
+    if (isBlocked(x0 + (x1 - x0) * t, z0 + (z1 - z0) * t, 0, y0 + (y1 - y0) * t)) return true
+  }
+  return false
+}
+
+function enemyHitBox(mesh, e) {
+  const w = 0.45 * e.scale
+  const h = 1.85 * e.scale
+  const p = mesh.position
+  _eb.min.set(p.x - w, p.y, p.z - w)
+  _eb.max.set(p.x + w, p.y + h, p.z + w)
+  return _eb
+}
+
 function spawnWave() {
   const count = Math.min(4 + wave.value, 20)
   enemiesLeft.value = count
@@ -437,20 +470,22 @@ function spawnWave() {
     if (bossType && i === 0) type = bossType
     else {
       const r = Math.random()
-      if (r < 0.25) type = 'runner'
-      else if (r < 0.4) type = 'tank'
-      else if (r < 0.5) type = 'sniper'
+      if (r < 0.2) type = 'runner'
+      else if (r < 0.33) type = 'tank'
+      else if (r < 0.43) type = 'sniper'
+      else if (r < 0.53 && wave.value >= 2) type = 'bomber'
+      else if (r < 0.65 && wave.value >= 3) type = 'elite'
     }
     const cfg = ENEMY_CONFIG[type]
     const hp = Math.round(cfg.hp * (type === 'boss' ? 1 : waveScale))
 
     let sx, sz
-    do { sx = (Math.random() - 0.5) * 160; sz = (Math.random() - 0.5) * 160 } while (Math.hypot(sx - me.x, sz - me.z) < 25)
+    do { sx = (Math.random() - 0.5) * 160; sz = (Math.random() - 0.5) * 160 } while (Math.hypot(sx - me.x, sz - me.z) < 25 || isBlocked(sx, sz, 2))
 
     enemies.push({
       id: 'enemy' + i + '_' + Math.random(),
       type, x: sx, z: sz, ry: 0, hp, maxHp: hp, dead: false,
-      attackT: 0, hitT: 0, hitDir: new THREE.Vector3(),
+      attackT: 1 + Math.random() * 1.5, hitT: 0, hitDir: new THREE.Vector3(), ...enemyExtras(type, cfg),
       scale: cfg.scale, speed: cfg.speed * waveScale, color: cfg.color,
       attackDist: cfg.attackDist, bulletDmg: cfg.bulletDmg, bulletColor: cfg.bulletColor,
       weakPoint: cfg.weakPoint,
@@ -472,8 +507,18 @@ function checkDeath() {
 onMounted(() => {
   scene = new THREE.Scene()
   
-  scene.background = new THREE.Color(0x050510)
-  scene.fog = new THREE.FogExp2(0x050510, 0.008) 
+  scene.background = new THREE.Color(0x9fc3df)
+  scene.fog = new THREE.FogExp2(0xb9cfdb, 0.006)
+  const sky = new THREE.Mesh(
+    new THREE.SphereGeometry(500, 24, 16),
+    new THREE.ShaderMaterial({
+      side: THREE.BackSide, depthWrite: false, fog: false,
+      vertexShader: `varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `varying vec3 vP; void main(){ float h = clamp(vP.y, 0.0, 1.0); vec3 horizon = vec3(0.72, 0.81, 0.86); vec3 top = vec3(0.16, 0.38, 0.75); vec3 col = mix(horizon, top, pow(h, 0.45)); float d = max(dot(vP, normalize(vec3(80.0, 90.0, 60.0))), 0.0); col += vec3(1.0, 0.85, 0.6) * (pow(d, 64.0) * 0.6 + pow(d, 1500.0) * 4.0); gl_FragColor = vec4(col, 1.0); }`
+    })
+  )
+  sky.renderOrder = -1
+  scene.add(sky) 
 
   camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 1000)
   camera.rotation.order = 'YXZ'
@@ -498,8 +543,8 @@ onMounted(() => {
   
   // 1. Bloom (Toned way down)
   bloomPass = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.35, 0.4, 0.8)
-  bloomPass.threshold = 1.0
-  bloomPass.strength = 0.3
+  bloomPass.threshold = 1.2
+  bloomPass.strength = 0.08
   bloomPass.radius = 0.4
   composer.addPass(bloomPass)
   
@@ -522,12 +567,12 @@ onMounted(() => {
   composer.addPass(outputPass)
 
   // ===== LIGHTING =====
-  const hemiLight = new THREE.HemisphereLight(0x223344, 0x000000, 0.2) 
+  const hemiLight = new THREE.HemisphereLight(0xbfd8ff, 0x5a6a3a, 1.2) 
   hemiLight.position.set(0, 200, 0)
   scene.add(hemiLight)
 
-  const dirLight = new THREE.DirectionalLight(0x4466ff, 0.8) 
-  dirLight.position.set(100, 150, 100)
+  const dirLight = new THREE.DirectionalLight(0xfff1d6, 3.0) 
+  dirLight.position.set(80, 90, 60)
   dirLight.castShadow = true
   dirLight.shadow.camera.top = 100
   dirLight.shadow.camera.bottom = -100
@@ -543,8 +588,20 @@ onMounted(() => {
   scene.add(explosionLight)
 
   // Ground
+  const gc = document.createElement('canvas'); gc.width = gc.height = 256
+  const gctx = gc.getContext('2d')
+  gctx.fillStyle = '#5d6e36'; gctx.fillRect(0, 0, 256, 256)
+  for (let i = 0; i < 6000; i++) {
+    const g = 90 + Math.random() * 60
+    gctx.fillStyle = `rgba(${(g * 0.7) | 0},${g | 0},${(g * 0.35) | 0},0.35)`
+    gctx.fillRect(Math.random() * 256, Math.random() * 256, 2, 2)
+  }
+  const groundTex = new THREE.CanvasTexture(gc)
+  groundTex.wrapS = groundTex.wrapT = THREE.RepeatWrapping
+  groundTex.repeat.set(80, 80)
+  groundTex.colorSpace = THREE.SRGBColorSpace
   const groundGeo = new THREE.PlaneGeometry(400, 400)
-  const groundMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.7, metalness: 0.3 })
+  const groundMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: groundTex, roughness: 1, metalness: 0 })
   groundMesh = new THREE.Mesh(groundGeo, groundMat)
   groundMesh.rotation.x = -Math.PI / 2
   groundMesh.receiveShadow = true
@@ -554,21 +611,19 @@ onMounted(() => {
   grid.position.y = 0.01
   grid.material.opacity = 0.2
   grid.material.transparent = true
-  scene.add(grid)
+  // grid removed
 
   // Glowing Pillars
   for (let i = 0; i < 40; i++) {
-    const isCyan = Math.random() > 0.5
-    const color = isCyan ? 0x00ffff : 0xff00ff
     const pillar = new THREE.Group()
     const h = 4 + Math.random() * 6
     
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.8, h, 6), new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.9, roughness: 0.2 }))
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.45, h, 8), new THREE.MeshStandardMaterial({ color: 0x5b4630, metalness: 0, roughness: 1 }))
     base.position.y = h / 2; base.castShadow = true; base.receiveShadow = true
     pillar.add(base)
     
-    const lightStrip = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.82, 0.2, 6), new THREE.MeshStandardMaterial({ color: color, emissive: color, emissiveIntensity: 2.5 }))
-    lightStrip.position.y = h / 2
+    const lightStrip = new THREE.Mesh(new THREE.IcosahedronGeometry(2.4, 1), new THREE.MeshStandardMaterial({ color: 0x2f5a22, roughness: 1, metalness: 0, flatShading: true }))
+    lightStrip.position.y = h + 0.8; lightStrip.scale.set(1.3, 0.8, 1.3); lightStrip.castShadow = true
     pillar.add(lightStrip)
 
     // pillar point lights removed: emissive strip + bloom instead 
@@ -579,12 +634,12 @@ onMounted(() => {
     do { x = (Math.random() - 0.5) * 300; z = (Math.random() - 0.5) * 300 } while (Math.abs(x) < 15 && Math.abs(z) < 15)
     pillar.position.set(x, 0, z)
     scene.add(pillar)
-    obstacles.push(pillar)
+    obstacles.push(base)
   }
 
   // Crates
-  const crateMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.7, roughness: 0.5 })
-  const neonMat = new THREE.MeshStandardMaterial({ color: 0xffaa00, emissive: 0xffaa00, emissiveIntensity: 1 })
+  const crateMat = new THREE.MeshStandardMaterial({ color: 0x7a5a36, metalness: 0, roughness: 0.9 })
+  const neonMat = new THREE.MeshStandardMaterial({ color: 0x3b2b18, roughness: 1, metalness: 0 })
   for (let i = 0; i < 30; i++) {
     const w = 2 + Math.random() * 4
     const h = 2 + Math.random() * 4
@@ -606,7 +661,7 @@ onMounted(() => {
   }
 
   // Rocks
-  const rockMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, metalness: 0.9, roughness: 0.4 })
+  const rockMat = new THREE.MeshStandardMaterial({ color: 0x7b7a73, metalness: 0, roughness: 1, flatShading: true })
   for (let i = 0; i < 20; i++) {
     const size = 1 + Math.random() * 3
     const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(size), rockMat)
@@ -621,12 +676,13 @@ onMounted(() => {
 
   // Barrels
   for (let i = 0; i < 15; i++) {
-    const barrelMat = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0x880000, emissiveIntensity: 1.0, metalness: 0.5, roughness: 0.3 })
+    const barrelMat = new THREE.MeshStandardMaterial({ color: 0xa31a12, emissive: 0x000000, emissiveIntensity: 0, metalness: 0.4, roughness: 0.6 })
     const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 1.5, 16), barrelMat)
     barrel.position.set((Math.random() - 0.5) * 160, 0.75, (Math.random() - 0.5) * 160)
     barrel.castShadow = true; scene.add(barrel); barrels.push(barrel)
   }
 
+  world = buildWorld(scene, obstacles, barrels)
   miniMapCamera = new THREE.OrthographicCamera(-90, 90, 90, -90, 0.1, 1000)
   miniMapCamera.position.set(0, 100, 0); miniMapCamera.up.set(0, 0, -1); miniMapCamera.lookAt(0, 0, 0)
 
@@ -634,7 +690,7 @@ onMounted(() => {
   gunModel = new THREE.Group()
   
   const matBody = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.9, roughness: 0.2 })
-  accentMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 1.0 })
+  accentMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: 0.8, roughness: 0.4 })
   
   const upperReceiver = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.45), matBody)
   upperReceiver.position.set(0, 0.02, -0.15); gunModel.add(upperReceiver)
@@ -672,7 +728,7 @@ onMounted(() => {
   const sightTube = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.12, 16, 1, true), matBody)
   sightTube.rotation.x = Math.PI / 2; sightTube.position.set(0, 0.115, -0.15); gunModel.add(sightTube)
 
-  sightGlass = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 0.06), new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.3, side: THREE.DoubleSide }))
+  sightGlass = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 0.06), new THREE.MeshBasicMaterial({ color: 0x88aacc, transparent: true, opacity: 0.15, side: THREE.DoubleSide }))
   sightGlass.position.set(0, 0.115, -0.2); gunModel.add(sightGlass)
 
   const redDot = new THREE.Mesh(new THREE.SphereGeometry(0.004, 8, 8), new THREE.MeshBasicMaterial({ color: 0xff0000 }))
@@ -687,7 +743,7 @@ onMounted(() => {
   muzzleFlash = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 0.05), new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }))
   muzzleFlash.position.set(0, 0.02, -1.1); muzzleFlash.visible = false; gunModel.add(muzzleFlash)
 
-  muzzleLight = new THREE.PointLight(0x00ffff, 0, 5)
+  muzzleLight = new THREE.PointLight(0xffb060, 0, 5)
   muzzleLight.position.set(0, 0.02, -1.1); gunModel.add(muzzleLight)
   scene.add(camera)
 
@@ -706,10 +762,9 @@ onMounted(() => {
       isReloading.value = false
       reloadToken++
       
-      const colors = { pistol: 0x00ffff, shotgun: 0xffff00, sniper: 0xff00ff }
-      accentMat.color.setHex(colors[name])
-      accentMat.emissive.setHex(colors[name])
-      sightGlass.material.color.setHex(colors[name])
+      // gun accent stays metal
+      // no emissive per weapon
+      // sight glass keeps its color
       
       if (name === 'shotgun') { gunModel.scale.set(0.7, 0.65, 0.6) }
       else if (name === 'sniper') { gunModel.scale.set(0.5, 0.5, 0.9) }
@@ -770,6 +825,7 @@ onMounted(() => {
       updateRenderables(dt)
     }
     
+    world?.update(dt, now / 1000)
     composer.render()
 
     if (gameState.value === 'playing') {
@@ -789,7 +845,7 @@ onMounted(() => {
   }
 
   function updatePlayer(dt) {
-    rgbShiftPass.uniforms['amount'].value = THREE.MathUtils.lerp(rgbShiftPass.uniforms['amount'].value, 0.001, dt * 10)
+    rgbShiftPass.uniforms['amount'].value = THREE.MathUtils.lerp(rgbShiftPass.uniforms['amount'].value, 0, dt * 10)
 
     if (overchargeTimer.value > 0) { overchargeTimer.value -= dt; if (overchargeTimer.value < 0) overchargeTimer.value = 0 }
     
@@ -870,16 +926,18 @@ onMounted(() => {
   function updateCombat(dt) {
     for (let i = playerLasers.length - 1; i >= 0; i--) {
       const l = playerLasers[i]
+      const px0 = l.mesh.position.x, py0 = l.mesh.position.y, pz0 = l.mesh.position.z
       l.mesh.position.add(l.vel.clone().multiplyScalar(dt))
       l.life -= dt
-      let hit = false
-      const laserBox = new THREE.Box3().setFromCenterAndSize(l.mesh.position, new THREE.Vector3(0.8, 0.8, 2))
+      let hit = pathBlocked(px0, py0, pz0, l.mesh.position.x, l.mesh.position.y, l.mesh.position.z)
+      if (hit) spawnParticles(l.mesh.position, 0xcccccc, 4)
+      const laserBox = hit ? new THREE.Box3() : new THREE.Box3().setFromCenterAndSize(l.mesh.position, new THREE.Vector3(0.8, 0.8, 2))
 
       for (const e of enemies) {
         if (e.dead) continue
         const mesh = scene.getObjectByName(e.id)
         if (!mesh) continue
-        const enemyBox = new THREE.Box3().setFromObject(mesh)
+        const enemyBox = enemyHitBox(mesh, e)
         if (!laserBox.intersectsBox(enemyBox)) continue
 
         const hitY = l.mesh.position.y
@@ -901,6 +959,7 @@ onMounted(() => {
         if (isHeadshot) finalDamage *= 2
         if (isWeakpoint) finalDamage *= 3
 
+        if (e.shield > 0) { const soak = Math.min(e.shield, finalDamage); e.shield -= soak; finalDamage -= soak }
         e.hp -= finalDamage
         e.hitT = 0.15
         e.hitDir = l.vel.clone().normalize()
@@ -933,6 +992,7 @@ onMounted(() => {
       const b = enemyBullets[i]
       b.position.add(b.userData.vel.clone().multiplyScalar(dt))
       b.userData.life -= dt
+      if (isBlocked(b.position.x, b.position.z, 0, b.position.y)) b.userData.life = 0
       if (b.position.distanceTo(new THREE.Vector3(me.x, camera.position.y, me.z)) < 0.8) {
         damagePlayer(b.userData.dmg || 15, b.position.x, b.position.z)
         b.userData.life = 0
@@ -1088,87 +1148,10 @@ onMounted(() => {
       return
     }
 
+    trackPlayer(dt)
     for (const e of enemies) {
       if (e.dead) continue
-      const dx = me.x - e.x, dz = me.z - e.z
-      const dist = Math.sqrt(dx * dx + dz * dz)
-      
-      if (e.hitT > 0) { e.hitT -= dt; continue }
-      
-      const los = dist < 3 || hasLineOfSight(e.x, e.z, me.x, me.z)
-
-      e.ry = Math.atan2(dx, dz)
-
-      let moveX = 0, moveZ = 0;
-      const angleToPlayer = Math.atan2(dx, dz)
-      
-      if (e.type === 'sniper') {
-        if (dist < 25) {
-          moveX = -Math.sin(angleToPlayer) * e.speed * dt
-          moveZ = -Math.cos(angleToPlayer) * e.speed * dt
-        } else if (dist > 60) {
-          moveX = Math.sin(angleToPlayer) * e.speed * 0.5 * dt
-          moveZ = Math.cos(angleToPlayer) * e.speed * 0.5 * dt
-        } else {
-          moveX = Math.sin(angleToPlayer + (Math.PI/2) * e.strafeDir) * e.speed * 0.3 * dt
-          moveZ = Math.cos(angleToPlayer + (Math.PI/2) * e.strafeDir) * e.speed * 0.3 * dt
-        }
-        if (dist < e.attackDist && dist > 10 && los) {
-          e.attackT -= dt
-          if (e.attackT <= 0) { fireEnemyBullet(e, dx, dz, 40); e.attackT = 2.0 }
-        }
-      } 
-      else if (e.type === 'runner') {
-        if (dist > 2) {
-          const zigZag = Math.sin(performance.now() * 0.01 + e.x) * 0.5
-          const moveAngle = angleToPlayer + zigZag
-          moveX = Math.sin(moveAngle) * e.speed * dt
-          moveZ = Math.cos(moveAngle) * e.speed * dt
-        } else {
-          e.attackT -= dt
-          if (e.attackT <= 0) { damagePlayer(10, e.x, e.z); e.attackT = 1.0 }
-        }
-      }
-      else if (e.type === 'tank' || e.type === 'boss') {
-        if (dist > 3) {
-          moveX = Math.sin(angleToPlayer) * e.speed * dt
-          moveZ = Math.cos(angleToPlayer) * e.speed * dt
-          if (dist < e.attackDist && los) {
-            e.attackT -= dt
-            if (e.attackT <= 0) { fireEnemyBullet(e, dx, dz, 20); e.attackT = e.type === 'boss' ? 0.3 : 1.5 }
-          }
-        } else {
-          e.attackT -= dt
-          if (e.attackT <= 0) { damagePlayer(e.type === 'boss' ? 50 : 30, e.x, e.z); e.attackT = 1.5 }
-        }
-      }
-      else {
-        if (dist > 20) {
-          moveX = Math.sin(angleToPlayer) * e.speed * dt
-          moveZ = Math.cos(angleToPlayer) * e.speed * dt
-        } else if (dist > 3) {
-          const strafeAngle = angleToPlayer + (Math.PI/2) * e.strafeDir
-          moveX = Math.sin(strafeAngle) * e.speed * dt
-          moveZ = Math.cos(strafeAngle) * e.speed * dt
-          if (Math.random() < 0.01) e.strafeDir *= -1;
-        }
-        if (dist < e.attackDist && dist > 10 && los) {
-          e.attackT -= dt
-          if (e.attackT <= 0) { fireEnemyBullet(e, dx, dz, 20); e.attackT = 1.2 }
-        } else if (dist <= 3) {
-          e.attackT -= dt
-          if (e.attackT <= 0) { damagePlayer(15, e.x, e.z); e.attackT = 1.0 }
-        }
-      }
-
-      let canX = true, canZ = true
-      for (const obs of obstacles) {
-        const b = (obs.userData.boxE ||= new THREE.Box3().setFromObject(obs))
-        if (b.containsPoint(new THREE.Vector3(e.x + moveX, 1, e.z))) canX = false
-        if (b.containsPoint(new THREE.Vector3(e.x, 1, e.z + moveZ))) canZ = false
-      }
-      if (canX) e.x += moveX
-      if (canZ) e.z += moveZ
+      updateEnemyAI(e, dt)
     }
 
     for (let i = 0; i < enemies.length; i++) {
@@ -1189,15 +1172,208 @@ onMounted(() => {
     }
   }
 
-  function fireEnemyBullet(e, dx, dz, speed) {
-    const geo = new THREE.SphereGeometry(0.15, 6, 6)
-    const mat = new THREE.MeshBasicMaterial({ color: e.bulletColor })
+  let pvx = 0, pvz = 0, lpx = 0, lpz = 0
+  const UP = new THREE.Vector3(0, 1, 0)
+  const _dir = new THREE.Vector3()
+
+  function trackPlayer(dt) {
+    if (dt <= 0) return
+    pvx += ((me.x - lpx) / dt - pvx) * 0.3
+    pvz += ((me.z - lpz) / dt - pvz) * 0.3
+    const sp = Math.hypot(pvx, pvz)
+    if (sp > 12) { pvx *= 12 / sp; pvz *= 12 / sp }
+    lpx = me.x; lpz = me.z
+  }
+
+  function moveEnemy(e, ang, mul, dt) {
+    const step = e.speed * mul * dt
+    const nx = e.x + Math.sin(ang) * step, nz = e.z + Math.cos(ang) * step
+    if (!isBlocked(nx, nz)) { e.x = nx; e.z = nz }
+    else if (!isBlocked(nx, e.z)) e.x = nx
+    else if (!isBlocked(e.x, nz)) e.z = nz
+    else {
+      const side = ang + (Math.PI / 2) * e.strafeDir
+      const sx = e.x + Math.sin(side) * step, sz = e.z + Math.cos(side) * step
+      if (!isBlocked(sx, sz)) { e.x = sx; e.z = sz } else e.strafeDir *= -1
+    }
+    e.x = Math.max(-98, Math.min(98, e.x))
+    e.z = Math.max(-98, Math.min(98, e.z))
+  }
+
+  function makeEnemy(type, x, z) {
+    const cfg = ENEMY_CONFIG[type]
+    const waveScale = 1 + (wave.value - 1) * 0.06
+    const hp = Math.round(cfg.hp * waveScale)
+    return {
+      id: 'enemy_m' + Math.random(), type, x, z, ry: 0, hp, maxHp: hp, dead: false,
+      attackT: 1, hitT: 0, hitDir: new THREE.Vector3(),
+      scale: cfg.scale, speed: cfg.speed * waveScale, color: cfg.color,
+      attackDist: cfg.attackDist, bulletDmg: cfg.bulletDmg, bulletColor: cfg.bulletColor,
+      weakPoint: cfg.weakPoint, strafeDir: Math.random() > 0.5 ? 1 : -1,
+      ...enemyExtras(type, cfg)
+    }
+  }
+  function spawnMinion(type, x, z) { enemies.push(makeEnemy(type, x, z)) }
+
+  function bomberBlast(e) {
+    playSound('explosion')
+    spawnParticles(new THREE.Vector3(e.x, 1, e.z), 0xff5522, 25)
+    cameraShake = Math.max(cameraShake, 0.35)
+    if (Math.hypot(me.x - e.x, me.z - e.z) < 7) damagePlayer(35, e.x, e.z)
+    e.dead = true
+    const m = scene.getObjectByName(e.id)
+    if (m) scene.remove(m)
+  }
+
+  function fireEnemyBullet(e, speed, opts = {}) {
+    const { yaw = 0, err = 0, size = 1, dmgMult = 1, lead = true, aim = true } = opts
+    const sy = Math.min(1.5 * e.scale, 2.2)
+    if (aim) {
+      const d = Math.hypot(me.x - e.x, me.z - e.z)
+      const t = lead ? (d / speed) * 0.8 : 0
+      _dir.set(me.x + pvx * t - e.x, camera.position.y - 0.3 - sy, me.z + pvz * t - e.z).normalize()
+      const a = yaw + (Math.random() - 0.5) * 2 * err * Math.max(0.5, 1.3 - wave.value * 0.06)
+      if (a !== 0) _dir.applyAxisAngle(UP, a)
+    } else {
+      _dir.set(Math.sin(yaw), 0, Math.cos(yaw))
+    }
+    const geo = new THREE.SphereGeometry(0.15 * size, 6, 6)
+    const mat = new THREE.MeshBasicMaterial({ color: e.bulletColor || 0xffc766 })
     const eb = new THREE.Mesh(geo, mat)
-    eb.position.set(e.x, 1.5 * e.scale, e.z)
-    eb.userData.vel = new THREE.Vector3(dx, 0, dz).normalize().multiplyScalar(speed)
-    eb.userData.life = 2.0
-    eb.userData.dmg = e.bulletDmg
+    eb.position.set(e.x + Math.sin(e.ry) * 0.7, sy, e.z + Math.cos(e.ry) * 0.7)
+    eb.userData.vel = _dir.clone().multiplyScalar(speed)
+    eb.userData.life = Math.min(4, (e.attackDist * 1.2) / speed)
+    eb.userData.dmg = e.bulletDmg * dmgMult
+    e.flashT = 0.06
     scene.add(eb); enemyBullets.push(eb)
+  }
+
+  function updateEnemyAI(e, dt) {
+    const dx = me.x - e.x, dz = me.z - e.z
+    const dist = Math.sqrt(dx * dx + dz * dz)
+    e.dist = dist
+    if (e.hitT > 0) { e.hitT -= dt; if (!e.heavy) return }
+    e.dashCd -= dt; e.dashT -= dt; e.losT -= dt
+    if (e.losT <= 0) { e.los = dist < 3 || hasLineOfSight(e.x, e.z, me.x, me.z); e.losT = 0.15 + Math.random() * 0.1 }
+    const los = e.los
+    const ang = Math.atan2(dx, dz)
+    e.ry = ang
+    if (Math.random() < dt * 0.5) e.strafeDir *= -1
+    const side = (Math.PI / 2) * e.strafeDir
+    const melee = (dmg, cd) => { e.attackT -= dt; if (e.attackT <= 0) { damagePlayer(dmg, e.x, e.z); e.attackT = cd } }
+
+    switch (e.type) {
+      case 'normal': {
+        if (dist > 28) moveEnemy(e, ang, 1, dt)
+        else if (dist > 13) moveEnemy(e, ang + side, 0.8, dt)
+        else if (dist > 3) moveEnemy(e, ang + Math.PI - side * 0.4, 0.6, dt)
+        if (dist <= 3) melee(15, 1)
+        else if (dist < e.attackDist && los) {
+          e.attackT -= dt
+          if (e.attackT <= 0) {
+            fireEnemyBullet(e, 30, { err: 0.07 })
+            e.burstLeft--
+            if (e.burstLeft > 0) e.attackT = 0.14
+            else { e.burstLeft = 3; e.attackT = 1.4 + Math.random() * 0.8 }
+          }
+        }
+        break
+      }
+      case 'elite': {
+        if (e.dashCd <= 0) { e.dashCd = 2 + Math.random() * 2; e.dashT = 0.3; e.strafeDir *= -1 }
+        const dash = e.dashT > 0
+        if (dist > 30) moveEnemy(e, ang, 1, dt)
+        else if (dist > 6) moveEnemy(e, ang + side, dash ? 3.2 : 0.9, dt)
+        else moveEnemy(e, ang + Math.PI - side * 0.3, 0.9, dt)
+        if (dist < e.attackDist && los) {
+          e.attackT -= dt
+          if (e.attackT <= 0) {
+            fireEnemyBullet(e, 38, { err: 0.03 })
+            e.burstLeft--
+            if (e.burstLeft > 0) e.attackT = 0.1
+            else { e.burstLeft = 4; e.attackT = 1.1 + Math.random() * 0.5 }
+          }
+        }
+        break
+      }
+      case 'runner': {
+        if (dist > 2.2) {
+          if (e.dashCd <= 0 && dist < 10) { e.dashCd = 3 + Math.random() * 2; e.dashT = 0.4 }
+          const zig = Math.sin(performance.now() * 0.008 + e.seed) * (dist > 6 ? 0.6 : 0.15)
+          moveEnemy(e, ang + zig, e.dashT > 0 ? 2.4 : 1, dt)
+        } else melee(10, 0.8)
+        break
+      }
+      case 'tank': {
+        if (dist > 4) {
+          moveEnemy(e, ang, 1, dt)
+          if (dist < e.attackDist && los) {
+            e.attackT -= dt
+            if (e.attackT <= 0) {
+              for (const y of [-0.1, 0, 0.1]) fireEnemyBullet(e, 24, { yaw: y, err: 0.02, size: 1.5 })
+              e.attackT = 2.2
+            }
+          }
+        } else melee(30, 1.5)
+        break
+      }
+      case 'sniper': {
+        if (dist < 28) moveEnemy(e, ang + Math.PI, 1, dt)
+        else if (dist > 65) moveEnemy(e, ang, 0.5, dt)
+        else moveEnemy(e, ang + side, 0.3, dt)
+        if (dist < e.attackDist && dist > 10 && los) {
+          e.attackT -= dt
+          if (e.attackT <= 0) { fireEnemyBullet(e, 55, { err: 0.006, size: 1.2 }); e.attackT = 2.8 + Math.random() }
+        }
+        break
+      }
+      case 'bomber': {
+        if (e.fuse > 0) {
+          e.fuse -= dt
+          moveEnemy(e, ang, 0.3, dt)
+          if (e.fuse <= 0) { bomberBlast(e); return }
+        } else {
+          const zig = Math.sin(performance.now() * 0.006 + e.seed) * 0.35
+          moveEnemy(e, ang + zig, 1, dt)
+          if (dist < 4.5) e.fuse = 0.7
+        }
+        break
+      }
+      case 'boss': {
+        const ratio = e.hp / e.maxHp
+        const phase = ratio < 0.33 ? 3 : ratio < 0.66 ? 2 : 1
+        if (phase > e.phase) {
+          e.phase = phase
+          announce(phase === 2 ? 'PHASE 2' : 'ENRAGED', '☠ BOSS ☠', 1600)
+          cameraShake = Math.max(cameraShake, 0.5)
+          const kind = phase === 2 ? 'runner' : 'bomber'
+          for (let k = -1; k <= 1; k++) spawnMinion(kind, e.x + k * 5, e.z + 5)
+        }
+        const mul = phase === 3 ? 1.5 : 1
+        if (dist > 14) moveEnemy(e, ang, mul, dt)
+        else if (dist > 5) moveEnemy(e, ang + side, 0.6 * mul, dt)
+        if (dist <= 5) melee(50, 1.2)
+        else if (dist < e.attackDist && los) {
+          e.attackT -= dt
+          if (e.attackT <= 0) {
+            const spread = phase === 1 ? [-0.12, 0, 0.12] : [-0.2, -0.1, 0, 0.1, 0.2]
+            for (const y of spread) fireEnemyBullet(e, 28, { yaw: y, err: 0.01, size: 2, lead: false })
+            e.attackT = phase === 3 ? 0.7 : 1
+          }
+          if (phase === 3) {
+            e.ringT -= dt
+            if (e.ringT <= 0) {
+              e.ringT = 3
+              const off = Math.random() * Math.PI
+              for (let k = 0; k < 16; k++) fireEnemyBullet(e, 14, { aim: false, yaw: off + (k / 16) * Math.PI * 2, size: 1.6, dmgMult: 0.6 })
+            }
+          }
+        }
+        break
+      }
+      default:
+        break
+    }
   }
 
   function updateRenderables(dt) {
@@ -1236,7 +1412,7 @@ onMounted(() => {
         m.userData.mixer.update(dt)
       }
 
-      if (m.userData.flash) m.userData.flash.visible = e.attackT > (e.type === 'boss' ? 0.2 : (e.type === 'sniper' ? 1.9 : 1.4))
+      updateEnemyVisuals(m, e, dt)
     }
 
     for (const child of scene.children) {
@@ -1245,51 +1421,7 @@ onMounted(() => {
   }
 
   function createEnemyMesh(e) {
-    const m = new THREE.Group()
-    m.name = e.id
-    const gunGroup = new THREE.Group()
-    const eGunMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.8 })
-    const gunBody = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.15, 0.6), eGunMat)
-    const gunBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.5, 8), eGunMat)
-    gunBarrel.rotation.x = Math.PI / 2; gunBarrel.position.z = -0.5
-    gunGroup.add(gunBody, gunBarrel)
-    gunGroup.position.set(0.25, 1.2, 0.5) 
-
-    const flash = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.3), new THREE.MeshBasicMaterial({ color: e.color, transparent: true, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }))
-    flash.position.set(0, 0, -0.8); flash.visible = false
-    gunGroup.add(flash)
-    m.userData.flash = flash
-    m.add(gunGroup)
-
-    if (soldier) {
-      const model = SkeletonUtils.clone(soldier.scene)
-      model.rotation.y = Math.PI 
-      model.traverse(o => { if (o.isMesh) o.castShadow = true })
-      model.scale.setScalar(e.scale)
-      m.add(model)
-      if (soldier.animations.length) {
-        const mixer = new THREE.AnimationMixer(model)
-        const run = mixer.clipAction(soldier.animations.find(a => a.name.toLowerCase().includes('run')) || soldier.animations[0])
-        const idle = mixer.clipAction(soldier.animations.find(a => a.name.toLowerCase().includes('idle')) || soldier.animations[0])
-        idle.play()
-        const bones = {}
-        model.traverse(o => { if (o.isBone) bones[o.name] = o })
-        m.userData = { ...m.userData, mixer, run, idle, state: 'idle', bones }
-      }
-    }
-
-    const tag = new THREE.Mesh(new THREE.SphereGeometry(0.2 * e.scale, 12, 12), new THREE.MeshBasicMaterial({ color: e.color }))
-    tag.position.y = 2.2 * e.scale
-    m.add(tag)
-
-    if (e.weakPoint) {
-      const weak = new THREE.Mesh(new THREE.SphereGeometry(0.25 * e.scale, 12, 12), new THREE.MeshBasicMaterial({ color: 0xff00ff }))
-      weak.position.set(0, 1.0 * e.scale, -0.6 * e.scale)
-      m.add(weak)
-    }
-
-    if (e.type === 'boss') tag.scale.setScalar(2.5)
-    return m
+    return buildEnemyMesh(e, soldier)
   }
 
   loop()

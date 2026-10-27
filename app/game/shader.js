@@ -21,9 +21,9 @@ export const CinematicShader = {
       
       float dist = distance(vUv, vec2(0.5));
       float vignette = smoothstep(0.8, 0.2, dist);
-      color.rgb *= mix(1.0, vignette, intensity * 0.8);
+      color.rgb *= mix(1.0, vignette, intensity * 0.35);
 
-      color.rgb += vec3(0.0, 0.02, 0.05) * (1.0 - color.rgb);
+      color.rgb *= vec3(1.04, 1.0, 0.94);
 
       gl_FragColor = color;
     }
