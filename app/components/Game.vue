@@ -123,6 +123,7 @@ import { WEAPON_CONFIG, weaponAmmo, ENEMY_CONFIG } from '../game/config.js'
 import { CinematicShader } from '../game/shader.js'
 import { initAudio, playSound } from '../game/audio.js'
 import { buildWorld } from '../game/world.js'
+import { buildPistol, buildShotgun, buildSniper } from '../game/weapons.js'
 import { enemyExtras, buildEnemyMesh, updateEnemyVisuals, hideEnemyExtras } from '../game/enemies.js'
 
 const root = ref(null)
@@ -167,15 +168,28 @@ const keys = {}
 const me = { x: 0, z: 0, ry: 0 }
 let verticalVel = 0, isGrounded = true
 
-let gunModel, muzzleLight, muzzleFlash, accentMat, sightGlass
-const HIP_POS = new THREE.Vector3(0.25, -0.22, -0.5)
-const ADS_POS = new THREE.Vector3(0, -0.115, -0.35)
+let muzzleLight, muzzleFlash, weapons = {}
+let mouseHeld = false, bloom = 0, equipTime = 0
+const _rayOrigin = new THREE.Vector3(), _rayDir = new THREE.Vector3(), _aimPoint = new THREE.Vector3(), _muzzlePos = new THREE.Vector3()
+const HIP_POS = {
+  pistol: new THREE.Vector3(0.15, -0.15, -0.35),
+  shotgun: new THREE.Vector3(0.15, -0.18, -0.4),
+  sniper: new THREE.Vector3(0.15, -0.18, -0.4)
+}
+const ADS_POS = {
+  pistol: new THREE.Vector3(0, -0.0915, -0.3),
+  shotgun: new THREE.Vector3(0, -0.087, -0.3),
+  sniper: new THREE.Vector3(0, -0.07, -0.3)
+}
 
-const gunCurrentPos = HIP_POS.clone()
+const gunCurrentPos = new THREE.Vector3(0, 0, 0)
 const gunRot = new THREE.Vector3(0, 0, 0)
 const gunSway = new THREE.Vector3(0, 0, 0)
 let moveBobTime = 0, currentMoveAmount = 0, lastShootTime = 0, cameraShake = 0
 let landingKick = 0, fovKick = 0
+let rmbHeld = false, adsBlend = 0, adsEase = 0
+const BASE_FOV = 70
+const adsFov = () => currentWeapon.value === 'sniper' ? 20 : currentWeapon.value === 'shotgun' ? 55 : 50
 
 const obstacles = [], barrels = []
 let enemies = []
@@ -271,7 +285,14 @@ function buyUpgrade(type) {
   else if (type === 'reload' && scrap.value >= 200) { scrap.value -= 200; reloadMult.value += 0.20; playSound('reload') }
 }
 
-function startNextWave() { wave.value++; gameState.value = 'playing'; renderer.domElement.requestPointerLock(); spawnWave() }
+function safePointerLock() {
+  try {
+    const p = renderer.domElement.requestPointerLock();
+    if (p && p.catch) p.catch(() => {});
+  } catch (e) {}
+}
+
+function startNextWave() { wave.value++; adsBlend = 0; adsEase = 0; rmbHeld = false; gameState.value = 'playing'; renderer.domElement.requestPointerLock().catch(()=>{}); spawnWave() }
 
 function spawnParticles(pos, color, count) {
   for (let i = 0; i < count; i++) {
@@ -296,24 +317,60 @@ function shoot() {
   currentAmmo.value--
   weaponAmmo[currentWeapon.value] = currentAmmo.value
   const isCrit = overchargeTimer.value > 0
-  const damage = cfg.damage * damageMult.value * (isCrit ? 2 : 1) // FIXED: let -> const
+  const damage = cfg.damage * damageMult.value * (isCrit ? 2 : 1)
 
-  const dir = new THREE.Vector3(); camera.getWorldDirection(dir)
+  // 1. Compute aim point
+  _rayOrigin.copy(camera.position)
+  camera.getWorldDirection(_rayDir)
+  const raycaster = new THREE.Raycaster(_rayOrigin, _rayDir, 0, 300)
+  raycaster.camera = camera // Fix: Sprites (enemy health bars) need the camera to raycast
+  const hitObs = raycaster.intersectObjects(obstacles, true)
+  const enemyMeshes = []
+  for (const e of enemies) { if (!e.dead) { const m = scene.getObjectByName(e.id); if (m) enemyMeshes.push(m) } }
+  const hitEnemies = raycaster.intersectObjects(enemyMeshes, true)
+  
+  let hitDist = 300
+  if (hitObs.length > 0) hitDist = Math.min(hitDist, hitObs[0].distance)
+  if (hitEnemies.length > 0) hitDist = Math.min(hitDist, hitEnemies[0].distance)
+  
+  if (hitDist < 300) _aimPoint.copy(_rayOrigin).add(_rayDir.clone().multiplyScalar(hitDist))
+  else _aimPoint.copy(_rayOrigin).add(_rayDir.clone().multiplyScalar(200))
+
+  // 2. Muzzle position
+  weapons[currentWeapon.value].muzzle.getWorldPosition(_muzzlePos)
+  if (isBlocked(_muzzlePos.x, _muzzlePos.z, 0.5, _muzzlePos.y)) {
+    _muzzlePos.copy(camera.position)
+  }
+
+  // 3. Spread
+  const currentSpread = THREE.MathUtils.lerp(cfg.spreadHip, cfg.spreadAds, adsEase)
+  let finalSpread = currentSpread * (1 - adsEase * 0.9) + bloom
+  if (keys.ShiftLeft || keys.ShiftRight || !isGrounded) finalSpread *= 1.5
+
+  // 4. Bloom
+  bloom = Math.min(bloom + cfg.bloomPerShot, 0.1)
+
+  // 5. Circular cone spread basis
+  const forward = _aimPoint.clone().sub(_muzzlePos).normalize()
+  const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize()
+  if (right.lengthSq() < 0.001) right.set(1, 0, 0)
+  const up = new THREE.Vector3().crossVectors(right, forward).normalize()
 
   for (let i = 0; i < cfg.bullets; i++) {
-    const shootDir = dir.clone()
-    if (cfg.spread > 0) {
-      const spread = isAiming.value ? cfg.spread * 0.1 : cfg.spread
-      shootDir.x += (Math.random() - 0.5) * spread
-      shootDir.y += (Math.random() - 0.5) * spread
-      shootDir.z += (Math.random() - 0.5) * spread
+    const shootDir = forward.clone()
+    if (finalSpread > 0) {
+      const angle = Math.random() * Math.PI * 2
+      const radius = Math.sqrt(Math.random()) * finalSpread
+      shootDir.addScaledVector(right, Math.cos(angle) * radius)
+      shootDir.addScaledVector(up, Math.sin(angle) * radius)
       shootDir.normalize()
     }
+    
     const laserGeo = new THREE.CylinderGeometry(0.02, 0.02, 3, 6)
     laserGeo.rotateX(Math.PI / 2)
     const laserMat = new THREE.MeshBasicMaterial({ color: 0xffd890, transparent: true, opacity: 0.8 })
     const laser = new THREE.Mesh(laserGeo, laserMat)
-    laser.position.copy(camera.position).add(shootDir.clone().multiplyScalar(1))
+    laser.position.copy(_muzzlePos).add(shootDir.clone().multiplyScalar(1.5))
     laser.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), shootDir)
     scene.add(laser)
     playerLasers.push({ mesh: laser, geo: laserGeo, mat: laserMat, vel: shootDir.clone().multiplyScalar(cfg.speed), life: 1.5, damage, color: cfg.color, crit: isCrit })
@@ -321,9 +378,15 @@ function shoot() {
 
   playSound(currentWeapon.value)
   
-  // FIXED: Much lower intensity
+  muzzleLight.position.copy(_muzzlePos)
   muzzleLight.intensity = currentWeapon.value === 'shotgun' ? 1 : currentWeapon.value === 'sniper' ? 1.5 : 0.5
-  if (muzzleFlash) { muzzleFlash.visible = true; muzzleFlash.material.color.setHex(0xffc060) }
+  
+  muzzleFlash.position.copy(_muzzlePos)
+  muzzleFlash.rotation.z = Math.random() * Math.PI
+  muzzleFlash.scale.setScalar(0.8 + Math.random() * 0.4)
+  muzzleFlash.visible = true
+  muzzleFlash.material.color.setHex(0xffc060)
+  
   setTimeout(() => { muzzleLight.intensity = 0; if (muzzleFlash) muzzleFlash.visible = false }, 50)
 
   const recoil = currentWeapon.value === 'sniper' ? 0.4 : currentWeapon.value === 'shotgun' ? 0.25 : 0.1
@@ -332,6 +395,8 @@ function shoot() {
   gunRot.y += (Math.random() - 0.5) * recoil
   cameraShake = recoil * 0.3
   fovKick = 6
+
+  if (currentAmmo.value <= 0) reloadWeapon()
 }
 
 function killEnemy(enemy, isHeadshot = false) {
@@ -415,7 +480,7 @@ function startGame() {
     me.x = 0; me.z = 0; me.ry = 0; camera.rotation.x = 0
     wave.value = 1; score.value = 0; scrap.value = 0
     damageMult.value = 1.0; reloadMult.value = 1.0
-    isReloading.value = false; overchargeTimer.value = 0
+    isReloading.value = false; overchargeTimer.value = 0; rmbHeld = false; adsBlend = 0; adsEase = 0
     comboCount.value = 1
     weaponAmmo.pistol = 12; weaponAmmo.shotgun = 6; weaponAmmo.sniper = 4
     currentWeapon.value = 'pistol'; currentAmmo.value = 12; maxAmmo.value = 12
@@ -425,7 +490,7 @@ function startGame() {
     enemies = []; lootItems.length = 0; playerLasers.length = 0
     spawnWave()
     gameState.value = 'playing'
-    renderer.domElement.requestPointerLock()
+    safePointerLock()
   }
 }
 
@@ -499,6 +564,7 @@ function spawnWave() {
 function checkDeath() {
   if (playerHp.value <= 0) {
     gameState.value = 'dead'
+    adsBlend = 0; adsEase = 0; rmbHeld = false
     if (document.pointerLockElement) document.exitPointerLock()
     if (score.value > highScore.value) { highScore.value = score.value; localStorage.setItem('nexus_highscore', score.value.toString()) }
   }
@@ -520,7 +586,7 @@ onMounted(() => {
   sky.renderOrder = -1
   scene.add(sky) 
 
-  camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 1000)
+  camera = new THREE.PerspectiveCamera(BASE_FOV, innerWidth / innerHeight, 0.02, 1000)
   camera.rotation.order = 'YXZ'
 
   renderer = new THREE.WebGLRenderer({ antialias: false }) 
@@ -686,65 +752,30 @@ onMounted(() => {
   miniMapCamera = new THREE.OrthographicCamera(-90, 90, 90, -90, 0.1, 1000)
   miniMapCamera.position.set(0, 100, 0); miniMapCamera.up.set(0, 0, -1); miniMapCamera.lookAt(0, 0, 0)
 
-  // ===== PLAYER GUN =====
-  gunModel = new THREE.Group()
-  
-  const matBody = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.9, roughness: 0.2 })
-  accentMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: 0.8, roughness: 0.4 })
-  
-  const upperReceiver = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.45), matBody)
-  upperReceiver.position.set(0, 0.02, -0.15); gunModel.add(upperReceiver)
-  
-  const lowerReceiver = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.06, 0.25), matBody)
-  lowerReceiver.position.set(0, -0.03, -0.1); gunModel.add(lowerReceiver)
+  // ===== PLAYER GUNS =====
+  weapons = {
+    pistol: buildPistol(WEAPON_CONFIG.pistol.color),
+    shotgun: buildShotgun(WEAPON_CONFIG.shotgun.color),
+    sniper: buildSniper(WEAPON_CONFIG.sniper.color)
+  }
+  weapons.pistol.group.scale.set(0.6, 0.6, 0.6)
+  weapons.shotgun.group.scale.set(0.6, 0.6, 0.6)
+  weapons.sniper.group.scale.set(0.5, 0.5, 0.5)
 
-  const handguard = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.3), matBody)
-  handguard.position.set(0, 0.02, -0.45); gunModel.add(handguard)
+  for (const name of ['pistol', 'shotgun', 'sniper']) {
+    const w = weapons[name]
+    w.group.position.copy(HIP_POS[name])
+    camera.add(w.group)
+    w.group.visible = (name === currentWeapon.value)
+  }
 
-  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.015, 0.35, 12), matBody)
-  barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.02, -0.75); gunModel.add(barrel)
-
-  const muzzleBrake = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.06, 12), matBody)
-  muzzleBrake.rotation.x = Math.PI / 2; muzzleBrake.position.set(0, 0.02, -0.92); gunModel.add(muzzleBrake)
-
-  const mag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.18, 0.08), matBody)
-  mag.position.set(0, -0.14, -0.15); mag.rotation.x = -0.25; gunModel.add(mag)
-
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.15, 0.08), matBody)
-  grip.position.set(0, -0.12, 0.02); grip.rotation.x = 0.3; gunModel.add(grip)
-
-  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.2), matBody)
-  stock.position.set(0, -0.02, 0.2); gunModel.add(stock)
-
-  const accentLine = new THREE.Mesh(new THREE.BoxGeometry(0.082, 0.01, 0.15), accentMat)
-  accentLine.position.set(0, -0.01, -0.35); gunModel.add(accentLine)
-
-  const accentMag = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.02, 0.08), accentMat)
-  accentMag.position.set(0, -0.22, -0.15); accentMag.rotation.x = -0.25; gunModel.add(accentMag)
-
-  const sightBase = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.02, 0.1), matBody)
-  sightBase.position.set(0, 0.08, -0.15); gunModel.add(sightBase)
-
-  const sightTube = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.12, 16, 1, true), matBody)
-  sightTube.rotation.x = Math.PI / 2; sightTube.position.set(0, 0.115, -0.15); gunModel.add(sightTube)
-
-  sightGlass = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 0.06), new THREE.MeshBasicMaterial({ color: 0x88aacc, transparent: true, opacity: 0.15, side: THREE.DoubleSide }))
-  sightGlass.position.set(0, 0.115, -0.2); gunModel.add(sightGlass)
-
-  const redDot = new THREE.Mesh(new THREE.SphereGeometry(0.004, 8, 8), new THREE.MeshBasicMaterial({ color: 0xff0000 }))
-  redDot.position.set(0, 0.115, -0.19); gunModel.add(redDot)
-
-  gunModel.position.copy(gunCurrentPos)
-  gunModel.scale.set(0.6, 0.6, 0.6)
-  
-  camera.add(gunModel)
-
-  // FIXED: Much smaller muzzle flash, further away
-  muzzleFlash = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 0.05), new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }))
-  muzzleFlash.position.set(0, 0.02, -1.1); muzzleFlash.visible = false; gunModel.add(muzzleFlash)
+  muzzleFlash = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 0.05), new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false }))
+  muzzleFlash.visible = false
+  scene.add(muzzleFlash)
 
   muzzleLight = new THREE.PointLight(0xffb060, 0, 5)
-  muzzleLight.position.set(0, 0.02, -1.1); gunModel.add(muzzleLight)
+  scene.add(muzzleLight)
+  
   scene.add(camera)
 
   new GLTFLoader().load('/models/Soldier.glb', (gltf) => { soldier = gltf }, undefined, (err) => console.error('Model failed', err))
@@ -762,13 +793,10 @@ onMounted(() => {
       isReloading.value = false
       reloadToken++
       
-      // gun accent stays metal
-      // no emissive per weapon
-      // sight glass keeps its color
-      
-      if (name === 'shotgun') { gunModel.scale.set(0.7, 0.65, 0.6) }
-      else if (name === 'sniper') { gunModel.scale.set(0.5, 0.5, 0.9) }
-      else { gunModel.scale.set(0.6, 0.6, 0.6) }
+      for (const n of ['pistol', 'shotgun', 'sniper']) {
+        if (weapons[n]) weapons[n].group.visible = (n === name)
+      }
+      equipTime = 0.25
     }
     if (e.code === 'Digit1') trySwitch('pistol')
     if (e.code === 'Digit2') trySwitch('shotgun')
@@ -778,17 +806,22 @@ onMounted(() => {
   onMouseMove = (e) => {
     if (document.pointerLockElement !== renderer.domElement) return
     if (gameState.value !== 'playing') return
-    me.ry -= e.movementX * 0.002
-    camera.rotation.x -= e.movementY * 0.002
+    const sens = 0.002 * (camera.fov / BASE_FOV)
+    me.ry -= e.movementX * sens
+    camera.rotation.x -= e.movementY * sens
     camera.rotation.x = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, camera.rotation.x))
   }
   onMouseDown = (e) => {
-    if (document.pointerLockElement !== renderer.domElement) { if (gameState.value === 'playing') renderer.domElement.requestPointerLock(); return }
-    if (e.button === 0 && gameState.value === 'playing') shoot()
-    if (e.button === 2 && gameState.value === 'playing') isAiming.value = true
+    if (document.pointerLockElement !== renderer.domElement) { if (gameState.value === 'playing') renderer.domElement.requestPointerLock().catch(()=>{}); return }
+    if (e.button === 0 && gameState.value === 'playing') { mouseHeld = true; shoot() }
+    if (e.button === 2 && gameState.value === 'playing') rmbHeld = true
   }
-  onMouseUp = (e) => { if (e.button === 2) isAiming.value = false }
+  onMouseUp = (e) => { 
+    if (e.button === 0) mouseHeld = false
+    if (e.button === 2) rmbHeld = false 
+  }
   onPointerLockChange = () => {
+    if (!document.pointerLockElement) { rmbHeld = false; adsBlend = 0; adsEase = 0; mouseHeld = false }
     if (!document.pointerLockElement && gameState.value === 'playing') gameState.value = 'paused'
     else if (document.pointerLockElement && gameState.value === 'paused') gameState.value = 'playing'
   }
@@ -850,9 +883,21 @@ onMounted(() => {
     if (overchargeTimer.value > 0) { overchargeTimer.value -= dt; if (overchargeTimer.value < 0) overchargeTimer.value = 0 }
     
     fovKick = THREE.MathUtils.lerp(fovKick, 0, dt * 10)
-    const baseFov = isAiming.value ? (currentWeapon.value === 'sniper' ? 20 : 50) : 70
-    camera.fov += (baseFov - camera.fov) * dt * 15
-    camera.fov += fovKick
+    bloom = Math.max(0, bloom - dt * 0.15)
+    if (mouseHeld && WEAPON_CONFIG[currentWeapon.value].auto && gameState.value === 'playing') shoot()
+
+    isAiming.value = gameState.value === 'playing' && rmbHeld && !(currentWeapon.value === 'sniper' && isReloading.value)
+    adsBlend = THREE.MathUtils.clamp(adsBlend + Math.sign((isAiming.value ? 1 : 0) - adsBlend) * dt / 0.12, 0, 1)
+    adsEase = adsBlend * adsBlend * (3 - 2 * adsBlend)
+    
+    for (const name of ['pistol', 'shotgun', 'sniper']) {
+      if (weapons[name]) {
+        weapons[name].group.visible = (name === currentWeapon.value) && !(name === 'sniper' && adsEase > 0.85)
+      }
+    }
+
+    const targetFov = THREE.MathUtils.lerp(BASE_FOV, adsFov(), adsEase)
+    camera.fov = targetFov + fovKick
     camera.updateProjectionMatrix()
 
     landingKick = THREE.MathUtils.lerp(landingKick, 0, dt * 10)
@@ -862,13 +907,14 @@ onMounted(() => {
     const isMoving = keys.KeyW || keys.KeyA || keys.KeyS || keys.KeyD
     currentMoveAmount += ((isMoving ? 1 : 0) - currentMoveAmount) * dt * 10
     moveBobTime += dt * (isMoving ? (keys.ShiftLeft ? 15 : 10) : 2)
-    const bobX = Math.cos(moveBobTime) * 0.01 * currentMoveAmount
-    const bobY = Math.sin(moveBobTime * 2) * 0.008 * currentMoveAmount
+    const bobX = Math.cos(moveBobTime) * 0.01 * currentMoveAmount * (1 - adsEase * 0.85)
+    const bobY = Math.sin(moveBobTime * 2) * 0.008 * currentMoveAmount * (1 - adsEase * 0.85)
 
-    gunSway.x += (me.ry - (gunModel.userData.lastRy || me.ry)) * 0.05
-    gunSway.y += (camera.rotation.x - (gunModel.userData.lastPitch || camera.rotation.x)) * 0.05
+    const w = weapons[currentWeapon.value]
+    gunSway.x += (me.ry - (w?.group.userData.lastRy || me.ry)) * 0.05
+    gunSway.y += (camera.rotation.x - (w?.group.userData.lastPitch || camera.rotation.x)) * 0.05
     gunSway.x *= 0.85; gunSway.y *= 0.85
-    gunModel.userData.lastRy = me.ry; gunModel.userData.lastPitch = camera.rotation.x
+    if (w) { w.group.userData.lastRy = me.ry; w.group.userData.lastPitch = camera.rotation.x }
 
     gunRot.x = THREE.MathUtils.lerp(gunRot.x, 0, dt * 15)
     gunRot.y = THREE.MathUtils.lerp(gunRot.y, 0, dt * 15)
@@ -876,21 +922,27 @@ onMounted(() => {
 
     const reloadOffset = isReloading.value ? -0.2 : 0
     
-    const targetPos = isAiming.value ? ADS_POS.clone() : HIP_POS.clone()
+    if (equipTime > 0) equipTime -= dt
+    const equipOffset = equipTime > 0 ? -Math.sin((equipTime / 0.25) * Math.PI) * 0.3 : 0
+
+    const targetPos = HIP_POS[currentWeapon.value].clone().lerp(ADS_POS[currentWeapon.value], adsEase)
     targetPos.x += bobX + gunSway.x
-    targetPos.y += bobY + gunSway.y + reloadOffset
+    targetPos.y += bobY + gunSway.y + reloadOffset + equipOffset
     
-    gunModel.position.x = THREE.MathUtils.lerp(gunModel.position.x, targetPos.x, dt * 20)
-    gunModel.position.y = THREE.MathUtils.lerp(gunModel.position.y, targetPos.y, dt * 20)
-    gunModel.position.z = THREE.MathUtils.lerp(gunModel.position.z, targetPos.z + gunCurrentPos.z, dt * 20)
-    
-    gunModel.rotation.x = gunSway.y * 2 + gunRot.x + (isReloading.value ? -0.3 : 0)
-    gunModel.rotation.y = gunSway.x * 2 + gunRot.y + (isReloading.value ? 0.3 : 0)
+    if (w) {
+      w.group.position.x = THREE.MathUtils.lerp(w.group.position.x, targetPos.x, dt * 20)
+      w.group.position.y = THREE.MathUtils.lerp(w.group.position.y, targetPos.y, dt * 20)
+      w.group.position.z = THREE.MathUtils.lerp(w.group.position.z, targetPos.z + gunCurrentPos.z, dt * 20)
+      
+      w.group.rotation.x = gunSway.y * 2 + gunRot.x + (isReloading.value ? -0.3 : 0)
+      w.group.rotation.y = gunSway.x * 2 + gunRot.y + (isReloading.value ? 0.3 : 0)
+    }
     camera.rotation.y = me.ry
 
     let nextX = me.x, nextZ = me.z
-    const sprint = (keys.ShiftLeft || keys.ShiftRight) ? 1.8 : 1.0
-    const speed = (isAiming.value ? 2.5 : 6) * sprint
+    const wantSprint = keys.ShiftLeft || keys.ShiftRight
+    const sprintMul = THREE.MathUtils.lerp(wantSprint ? 1.8 : 1.0, 1.0, adsEase)
+    const speed = THREE.MathUtils.lerp(6, 2.5, adsEase) * sprintMul
     if (keys.KeyW) { nextX -= Math.sin(me.ry) * speed * dt; nextZ -= Math.cos(me.ry) * speed * dt }
     if (keys.KeyS) { nextX += Math.sin(me.ry) * speed * dt; nextZ += Math.cos(me.ry) * speed * dt }
     if (keys.KeyA) { nextX -= Math.cos(me.ry) * speed * dt; nextZ += Math.sin(me.ry) * speed * dt }
@@ -922,6 +974,8 @@ onMounted(() => {
       camera.rotation.z = THREE.MathUtils.lerp(camera.rotation.z, tiltTarget, dt * 5)
     }
   }
+
+
 
   function updateCombat(dt) {
     for (let i = playerLasers.length - 1; i >= 0; i--) {
@@ -1144,6 +1198,7 @@ onMounted(() => {
       for (const en of enemies) { const m = scene.getObjectByName(en.id); if (m) scene.remove(m) }
       enemies = []
       gameState.value = 'shop'
+      adsBlend = 0; adsEase = 0; rmbHeld = false
       if (document.pointerLockElement) document.exitPointerLock()
       return
     }

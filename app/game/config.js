@@ -1,7 +1,7 @@
 export const WEAPON_CONFIG = {
-  pistol:  { maxAmmo: 12, damage: 50,  fireRate: 200,  reloadTime: 1500, color: 0x00ffff, speed: 120, bullets: 1, spread: 0 },
-  shotgun: { maxAmmo: 6,  damage: 25,  fireRate: 800,  reloadTime: 2500, color: 0xffff00, speed: 120, bullets: 5, spread: 0.2 },
-  sniper:  { maxAmmo: 4,  damage: 150, fireRate: 1500, reloadTime: 3000, color: 0xff00ff, speed: 250, bullets: 1, spread: 0 }
+  pistol:  { maxAmmo: 12, damage: 50,  fireRate: 200,  reloadTime: 1500, color: 0x00ffff, speed: 120, bullets: 1, spreadHip: 0.015, spreadAds: 0.001, recoilPitch: 0.015, recoilYaw: 0.005, recoilKickBack: 0.05, recoverySpeed: 15, auto: true, bloomPerShot: 0.005 },
+  shotgun: { maxAmmo: 6,  damage: 25,  fireRate: 800,  reloadTime: 2500, color: 0xffff00, speed: 120, bullets: 5, spreadHip: 0.08,  spreadAds: 0.06,  recoilPitch: 0.05,  recoilYaw: 0.02,  recoilKickBack: 0.15, recoverySpeed: 10, auto: false, bloomPerShot: 0.02 },
+  sniper:  { maxAmmo: 4,  damage: 150, fireRate: 1500, reloadTime: 3000, color: 0xff00ff, speed: 250, bullets: 1, spreadHip: 0.05,  spreadAds: 0.0005, recoilPitch: 0.08,  recoilYaw: 0.01,  recoilKickBack: 0.2, recoverySpeed: 8, auto: false, bloomPerShot: 0.05 }
 }
 export const weaponAmmo = { pistol: 12, shotgun: 6, sniper: 4 }
 
