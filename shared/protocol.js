@@ -8,6 +8,8 @@ export const PROTOCOL_VERSION = 1
 export const T = {
   HELLO: 'h', INPUT: 'i', PING: 'p', // client -> server
   WELCOME: 'w', SNAPSHOT: 's', JOIN: 'j', LEAVE: 'l', FULL: 'f', ERROR: 'e', PONG: 'o', // server -> client
+  HIT: 'x', // client -> server: I hit player g
+  DMG: 'm', SCORES: 'z', RESPAWN: 'r', // server -> client: damage/kill, kills+deaths table, respawn
 }
 
 // error codes carried in {t:'e', c}
@@ -119,6 +121,13 @@ const CLIENT = {
     if (!isInt(m.w, 0, 15)) return 'w'
     return null
   },
+  [T.HIT](m) {
+    if (!onlyKeys(m, ['t', 'g', 'h', 'w'])) return 'keys'
+    if (!isInt(m.g, 1, 2147483647)) return 'g'
+    if (!isInt(m.h, 0, 1)) return 'h'
+    if (!isInt(m.w, 0, 2)) return 'w'
+    return null
+  },
   [T.PING](m) {
     if (!onlyKeys(m, ['t', 'c'])) return 'keys'
     if (!isNum(m.c)) return 'c'
@@ -170,6 +179,25 @@ const SERVER = {
   [T.ERROR](m) {
     if (!onlyKeys(m, ['t', 'c'])) return 'keys'
     return isStr(m.c, 16) ? null : 'c'
+  },
+  [T.DMG](m) {
+    if (!onlyKeys(m, ['t', 'id', 'by', 'hp', 'h'])) return 'keys'
+    if (!isInt(m.id, 1, 2147483647) || !isInt(m.by, 1, 2147483647)) return 'id/by'
+    if (!isInt(m.hp, 0, 1000) || !isInt(m.h, 0, 1)) return 'hp/h'
+    return null
+  },
+  [T.SCORES](m) {
+    if (!onlyKeys(m, ['t', 'p'])) return 'keys'
+    if (!Array.isArray(m.p) || m.p.length > LIMITS.MAX_PLAYERS) return 'p'
+    for (const r of m.p) {
+      if (!Array.isArray(r) || r.length !== 3 || !isInt(r[0], 1, 2147483647) || !isInt(r[1], 0, 1000000) || !isInt(r[2], 0, 1000000)) return 'row'
+    }
+    return null
+  },
+  [T.RESPAWN](m) {
+    if (!onlyKeys(m, ['t', 'id', 'si'])) return 'keys'
+    if (!isInt(m.id, 1, 2147483647) || !isInt(m.si, 0, LIMITS.SPAWN_SLOTS - 1)) return 'id/si'
+    return null
   },
   [T.PONG](m) {
     if (!onlyKeys(m, ['t', 'c', 'ts'])) return 'keys'

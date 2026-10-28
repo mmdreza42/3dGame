@@ -94,6 +94,12 @@
       <button @click="startNextWave" style="margin-top:50px;padding:15px 40px;font-size:24px;font-weight:bold;background:#00ffff;color:#000;border:none;border-radius:2px;cursor:pointer;box-shadow:0 0 20px #00ffff;">START WAVE {{ wave + 1 }}</button>
     </div>
 
+    <div v-if="netMode.multi && gameState === 'mpdead'" style="position:fixed;inset:0;background:rgba(90,0,25,0.45);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:110;pointer-events:none;color:#fff;font-family:'Courier New', monospace;">
+      <h1 style="font-size:64px;margin:0;color:#ff0055;text-shadow:0 0 20px #ff0055;">YOU DIED</h1>
+      <p style="margin-top:12px;font-size:20px;">KILLED BY {{ mpKiller }}</p>
+      <p style="margin-top:6px;font-size:24px;color:#00ffff;">RESPAWN IN {{ mpCountdown }}</p>
+    </div>
+    <div v-if="netMode.multi && (gameState === 'playing' || gameState === 'mpdead')" style="position:fixed;left:20px;bottom:24px;z-index:60;font:bold 20px 'Courier New', monospace;color:#00ffaa;text-shadow:0 0 8px #000;">HP {{ Math.max(0, Math.round(playerHp)) }}</div>
     <!-- MULTIPLAYER (names are rendered with {{ }} only, never innerHTML) -->
     <div v-if="netMode.multi" style="position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:120;display:flex;gap:12px;align-items:center;font:12px 'Courier New', monospace;color:#00ffff;background:rgba(0,0,0,0.65);border:1px solid #00ffff;padding:4px 10px;box-shadow:0 0 10px rgba(0,255,255,0.3);">
       <span>ROOM {{ netMode.room.toUpperCase() }}</span>
@@ -104,7 +110,7 @@
     <div v-if="netMode.multi && netNote" style="position:fixed;top:44px;left:50%;transform:translateX(-50%);z-index:120;font:bold 14px 'Courier New', monospace;color:#ff0055;background:rgba(0,0,0,0.75);border:1px solid #ff0055;padding:6px 14px;max-width:80vw;word-break:break-all;">{{ netNote }}</div>
     <div v-if="netMode.multi && showScoreboard" style="position:fixed;top:18%;left:50%;transform:translateX(-50%);z-index:30;min-width:320px;background:rgba(0,0,0,0.8);border:2px solid #00ffff;box-shadow:0 0 20px rgba(0,255,255,0.35);padding:14px 22px;font:16px 'Courier New', monospace;color:#fff;">
       <div style="color:#00ffff;font-weight:bold;letter-spacing:3px;margin-bottom:8px;">PLAYERS · {{ netRoster.length }}/{{ ROOM_CAPACITY }}</div>
-      <div v-for="p in netRoster" :key="p.id" :style="{ color: p.self ? '#00ffff' : '#fff', padding: '2px 0' }">{{ p.name }}<span v-if="p.self" style="color:#ff0055;"> (YOU)</span></div>
+      <div v-for="p in netRoster" :key="p.id" :style="{ color: p.self ? '#00ffff' : '#fff', padding: '2px 0' }"><span style="display:inline-block;min-width:150px;">{{ p.name }}<span v-if="p.self" style="color:#ff0055;"> (YOU)</span></span><span style="color:#00ffaa;display:inline-block;min-width:50px;text-align:right;">K {{ p.k }}</span><span style="color:#ff0055;display:inline-block;min-width:50px;text-align:right;">D {{ p.d }}</span></div>
     </div>
     <div v-if="netMode.multi && gameState === 'playing' && lockLost" style="position:fixed;top:60%;left:50%;transform:translateX(-50%);z-index:90;pointer-events:none;font:bold 28px 'Courier New', monospace;color:#00ffff;text-shadow:0 0 15px #00ffff,0 2px 4px #000;">CLICK TO RESUME</div>
     <div v-if="netMode.multi && netStatus === 'full'" style="position:fixed;inset:0;background:rgba(0,0,0,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:130;color:#fff;font-family:'Courier New', monospace;">
@@ -167,6 +173,7 @@ import { NetClient } from '../pvp/net/NetClient.js'
 import { WebSocketTransport, resolveWsUrl } from '../pvp/net/WebSocketTransport.js'
 import { RemotePlayers } from '../pvp/net/RemotePlayers.js'
 import { parseNetMode, wsBaseFor, ROOM_CAPACITY } from '../pvp/net/netMode.js'
+import { segmentHitsPlayer, RESPAWN_MS } from '../../shared/combat.js'
 import { buildGuns } from '../game/guns.js'
 import { enemyExtras, buildEnemyMesh, updateEnemyVisuals, hideEnemyExtras } from '../game/enemies.js'
 
@@ -244,10 +251,10 @@ function goToRoom(code) {
   window.location.replace(`${window.location.pathname}?${q.toString()}`) // new room = new seed = new world: reload
 }
 
-function placeAtSpawn() {
+function placeAtSpawn(slot) {
   const pts = layout && layout.playerSpawns
   if (!net || net.status !== 'playing' || !pts || !pts.length) return false
-  const s = pts[net.slot % pts.length]
+  const s = pts[(slot ?? net.slot) % pts.length]
   me.x = s.x; me.z = s.z; me.ry = s.ry
   camera.position.x = s.x; camera.position.z = s.z; camera.position.y = 1.6
   verticalVel = 0; isGrounded = true; climbing = null
@@ -258,9 +265,59 @@ function placeAtSpawn() {
 function syncNetUi() {
   if (!net) return
   netPing.value = Math.round(net.rtt)
-  const list = net.scoreboard()
-  list.sort((a, b) => (Number(b.self) - Number(a.self)) || a.name.localeCompare(b.name))
+  const list = net.scoreboard().map((p) => ({ ...p, k: (net.scores.get(p.id) || {}).k || 0, d: (net.scores.get(p.id) || {}).d || 0 }))
+  list.sort((a, b) => (b.k - a.k) || (a.d - b.d) || a.name.localeCompare(b.name))
   netRoster.value = list
+}
+
+let remoteList = [], mpTimer = null, mpRespawnAt = 0
+const mpKiller = ref('')
+const mpCountdown = ref(0)
+
+function nameOfId(id) {
+  if (net && id === net.selfId) return playerName.value
+  const r = net && net.roster.get(id)
+  return r ? r.name : '?'
+}
+
+function onNetDamage(d) {
+  if (!net) return
+  const mine = d.id === net.selfId
+  if (d.by === net.selfId) {
+    triggerHitmarker(d.head ? '#ffaa00' : '#ff0000')
+    playSound(d.head ? 'headshot' : 'hit')
+  }
+  if (mine) {
+    playerHp.value = d.hp
+    triggerHurt()
+    const src = remoteList.find((r) => r.id === d.by)
+    if (src) triggerHitDirection(src.x, src.z)
+    playSound('hurt')
+  }
+  if (d.hp > 0) return
+  addKillFeed(nameOfId(d.by) + ' > ' + nameOfId(d.id) + (d.head ? ' (headshot)' : ''))
+  if (!mine || gameState.value !== 'playing') return
+  gameState.value = 'mpdead'
+  lmbDown = false; rmbDown = false; climbing = null; adsT = 0
+  scopeVisible.value = false
+  mpKiller.value = nameOfId(d.by)
+  mpRespawnAt = performance.now() + RESPAWN_MS
+  mpCountdown.value = Math.ceil(RESPAWN_MS / 1000)
+  if (mpTimer !== null) clearInterval(mpTimer)
+  mpTimer = setInterval(() => { mpCountdown.value = Math.max(0, Math.ceil((mpRespawnAt - performance.now()) / 1000)) }, 200)
+}
+
+function onNetRespawn(d) {
+  if (!net || d.id !== net.selfId || gameState.value !== 'mpdead') return
+  if (mpTimer !== null) { clearInterval(mpTimer); mpTimer = null }
+  playerHp.value = 100; maxHp.value = 100
+  isReloading.value = false
+  equipGun('pistol'); swapT = 0
+  weaponAmmo.pistol = 12; weaponAmmo.shotgun = 6; weaponAmmo.sniper = 4
+  currentAmmo.value = 12; maxAmmo.value = 12
+  placeAtSpawn(d.slot)
+  gameState.value = 'playing'
+  lockLost.value = !document.pointerLockElement
 }
 
 function startNet() {
@@ -294,6 +351,9 @@ function startNet() {
     net.on('shard', (d) => goToRoom(d.to)),
     net.on('full', () => { netNote.value = 'ROOM FULL' }),
     net.on('lost', () => { netNote.value = 'CONNECTION LOST: reload the page' }),
+    net.on('damage', onNetDamage),
+    net.on('scores', () => syncNetUi()),
+    net.on('respawn', onNetRespawn),
     net.on('server-error', (d) => { if (d.code === 'version') netNote.value = 'VERSION MISMATCH: reload the page' }),
   ]
   statTimer = setInterval(syncNetUi, 250)
@@ -301,6 +361,7 @@ function startNet() {
 }
 
 function stopNet() {
+  if (mpTimer !== null) { clearInterval(mpTimer); mpTimer = null }
   for (const off of offNet) off()
   offNet = []
   if (statTimer !== null) { clearInterval(statTimer); statTimer = null }
@@ -592,7 +653,7 @@ function shoot() {
     laser.position.copy(origin).addScaledVector(shootDir, t.len * 0.5)
     laser.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), shootDir)
     scene.add(laser)
-    playerLasers.push({ mesh: laser, geo: laserGeo, mat: laserMat, vel: shootDir.clone().multiplyScalar(cfg.speed), life: 1.5, damage, color: cfg.color, crit: isCrit })
+    playerLasers.push({ mesh: laser, geo: laserGeo, mat: laserMat, vel: shootDir.clone().multiplyScalar(cfg.speed), life: 1.5, damage, color: cfg.color, crit: isCrit, weapon: currentWeapon.value })
   }
 
   playSound(currentWeapon.value)
@@ -1170,7 +1231,7 @@ onMounted(() => {
     bloom = Math.max(0, bloom - dt * 0.05)
     camera.rotation.y = me.ry
 
-    if (net && remotes) remotes.update(net.sample())
+    if (net && remotes) { remoteList = net.sample(); remotes.update(remoteList) }
 
     crossGap.value = Math.round(5 + currentSpread() * innerHeight * 0.7)
     updateViewModel(dt, now, k, isMoving, sprinting)
@@ -1272,6 +1333,18 @@ onMounted(() => {
         if (e.hp <= 0) { e.dead = true; killEnemy(e, isHeadshot) }
         hit = true
         break
+      }
+
+      if (!hit && net && remoteList.length) {
+        const wpn = Math.max(0, WEAPON_LIST.indexOf(l.weapon))
+        for (const r of remoteList) {
+          const res = segmentHitsPlayer([px0, py0, pz0], [l.mesh.position.x, l.mesh.position.y, l.mesh.position.z], r)
+          if (!res) continue
+          net.sendHit(r.id, res.head, wpn)
+          spawnParticles(l.mesh.position, res.head ? 0xffaa00 : 0xff0000, 5)
+          hit = true
+          break
+        }
       }
 
       if (!hit) {

@@ -45,6 +45,7 @@ export class NetClient {
     this._firstDropAt = null
     this._hop = false
     this._token = null
+    this.scores = new Map() // id -> {k, d}
   }
 
   static _defaultStorage() {
@@ -98,6 +99,7 @@ export class NetClient {
         this._saveToken()
         this.roster.clear()
         this._remote.clear()
+        this.scores.clear()
         for (const [id, name, slot] of m.pl) this.roster.set(id, { id, name, slot })
         this._attempts = 0
         this._firstDropAt = null
@@ -146,6 +148,19 @@ export class NetClient {
         }
         break
       }
+      case T.DMG:
+        if (m.hp <= 0) this._remote.delete(m.id)
+        this._emit('damage', { id: m.id, by: m.by, hp: m.hp, head: m.h === 1 })
+        break
+      case T.SCORES:
+        this.scores.clear()
+        for (const [id, k, d] of m.p) this.scores.set(id, { k, d })
+        this._emit('scores', this.scores)
+        break
+      case T.RESPAWN:
+        this._remote.delete(m.id)
+        this._emit('respawn', { id: m.id, slot: m.si })
+        break
       case T.PONG:
         this.rtt = this.rtt ? this.rtt * 0.8 + (now - m.c) * 0.2 : now - m.c
         break
@@ -214,6 +229,11 @@ export class NetClient {
       })
     }
     return out
+  }
+
+  sendHit(target, head, weapon) {
+    if (this.status !== 'playing' || !this._t) return
+    this._t.send({ t: T.HIT, g: target, h: head ? 1 : 0, w: weapon | 0 })
   }
 
   // for the Tab scoreboard (kills/deaths arrive in step 5)
