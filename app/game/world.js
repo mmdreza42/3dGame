@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { buildMushrooms } from './mushrooms.js'
 
 const rnd = (a, b) => a + Math.random() * (b - a)
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
@@ -97,6 +98,9 @@ export function buildWorld(scene, obstacles, barrels) {
   const clouds = [], flames = [], glows = []
   const stones = [] // [x, y, z, size]
   const lilies = []  // [x, z]
+  const brackets = [] // shelf fungi on tree trunks, consumed by the mushroom module
+  const platforms = [] // standable decks: { x, z, hw, hd, y, gap }
+  const ladders = []   // climbable ladders: { x, z, bottom, top }
 
   // ---------- materials ----------
   const matWood = new THREE.MeshStandardMaterial({ color: 0x6b4c2e, roughness: 1 })
@@ -307,23 +311,32 @@ export function buildWorld(scene, obstacles, barrels) {
   }
   for (let i = 0; i < 9; i++) { const p = findSpot(9, 92); if (p) addWallRun(p.x, p.z) }
 
-  // ---------- watchtowers ----------
+  // ---------- watchtowers (climbable) ----------
+  // Deck top is y = 7.25. The ladder is on the +z side. Walk up to it and press E (or hold W).
+  // The deck is solid for bullets, and the front rail has a gap where the ladder reaches the deck.
   function addTower(x, z) {
     const legGeo = new THREE.CylinderGeometry(0.22, 0.28, 7, 8)
     for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) addMesh(legGeo, matWood, x + sx * 1.7, 3.5, z + sz * 1.7, { obstacle: true })
-    addMesh(new THREE.BoxGeometry(4.6, 0.3, 4.6), matWood2, x, 7.1, z)
-    const railA = new THREE.BoxGeometry(4.6, 0.15, 0.1), railB = new THREE.BoxGeometry(0.1, 0.15, 4.6)
-    for (const sgn of [-1, 1]) {
-      addMesh(railA, matWood, x, 7.9, z + sgn * 2.25, { receive: false })
-      addMesh(railB, matWood, x + sgn * 2.25, 7.9, z, { receive: false })
-    }
+    addMesh(new THREE.BoxGeometry(4.6, 0.3, 4.6), matWood2, x, 7.1, z, { obstacle: true })
+
+    const railX = new THREE.BoxGeometry(4.6, 0.15, 0.1), railZ = new THREE.BoxGeometry(0.1, 0.15, 4.6)
+    addMesh(railX, matWood, x, 7.9, z - 2.25, { receive: false })
+    for (const sgn of [-1, 1]) addMesh(railZ, matWood, x + sgn * 2.25, 7.9, z, { receive: false })
+    const frontPiece = new THREE.BoxGeometry(1.65, 0.15, 0.1)
+    for (const sgn of [-1, 1]) addMesh(frontPiece, matWood, x + sgn * 1.475, 7.9, z + 2.25, { receive: false })
+
     const postGeo = new THREE.CylinderGeometry(0.1, 0.1, 2.3, 6)
     for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) addMesh(postGeo, matWood, x + sx * 2.2, 8.3, z + sz * 2.2, { receive: false })
     const roofGeo = new THREE.ConeGeometry(3.6, 2.2, 4); roofGeo.rotateY(Math.PI / 4)
     addMesh(roofGeo, matCanvas[2], x, 10.6, z)
-    const railGeo = new THREE.BoxGeometry(0.08, 7, 0.08), rungGeo = new THREE.BoxGeometry(0.8, 0.07, 0.07)
-    for (const sx of [-0.4, 0.4]) addMesh(railGeo, matWood, x + sx, 3.5, z + 2.5, { receive: false })
-    for (let i = 0; i < 13; i++) addMesh(rungGeo, matWood, x, 0.5 + i * 0.5, z + 2.5, { receive: false })
+
+    // ladder: rails stick out above the deck so the top is easy to see
+    const ladRail = new THREE.BoxGeometry(0.08, 8.4, 0.08), rungGeo = new THREE.BoxGeometry(0.8, 0.07, 0.07)
+    for (const sx of [-0.4, 0.4]) addMesh(ladRail, matWood, x + sx, 4.2, z + 2.5, { receive: false })
+    for (let i = 0; i < 15; i++) addMesh(rungGeo, matWood, x, 0.5 + i * 0.5, z + 2.5, { receive: false })
+
+    platforms.push({ x, z, hw: 2.3, hd: 2.3, y: 7.25, gap: { x, hw: 0.65 } })
+    ladders.push({ x, z: z + 2.5, bottom: 0, top: 7.25 })
   }
   for (let i = 0; i < 2; i++) { const p = findSpot(7, 88); if (p) addTower(p.x, p.z) }
 
@@ -430,6 +443,20 @@ export function buildWorld(scene, obstacles, barrels) {
       oi++
     }
     put(trunks, ti++, t.x, 0, t.z, trunkR, trunkH, trunkR, 0)
+
+    // shelf fungi growing out of the trunk
+    if (t.solid && Math.random() < 0.55) {
+      const base = Math.random() * Math.PI * 2
+      const nb = 1 + Math.floor(Math.random() * 3)
+      const maxH = Math.min(trunkH * 0.85, t.pine ? trunkH * 0.45 : 3)
+      for (let b = 0; b < nb; b++) {
+        const hh = rnd(0.6, Math.max(0.7, maxH))
+        const a = base + b * rnd(0.5, 1.2)
+        const rad = trunkR * (1 - 0.3 * hh / trunkH) * 0.92
+        brackets.push({ x: t.x + Math.cos(a) * rad, y: hh, z: t.z + Math.sin(a) * rad, nx: Math.cos(a), nz: Math.sin(a), size: rnd(0.28, 0.6) * Math.min(1.3, s) })
+      }
+    }
+
     if (t.solid) {
       // invisible collider (not added to the scene) used by the game's collision + line-of-sight code
       const proxy = new THREE.Mesh(trunkGeo, proxyMat)
@@ -440,6 +467,9 @@ export function buildWorld(scene, obstacles, barrels) {
     }
   }
   scene.add(finish(trunks), ...pineL.map(finish), ...oakB.map(finish))
+
+  // ---------- mushrooms (all kinds) ----------
+  const mush = buildMushrooms(scene, obstacles, { occupied, findSpot, glowTex, brackets, anchors: specs.filter(t => t.solid) })
 
   // ---------- rubble / shore stones / lily pads ----------
   const rubble = inst(new THREE.DodecahedronGeometry(1, 0), stoneMat, stones.length, true)
@@ -469,7 +499,8 @@ export function buildWorld(scene, obstacles, barrels) {
     dust.rotation.y = t * 0.01
     bulbMat.color.setHSL(0.13, 1, 0.82 + Math.sin(t * 3) * 0.04)
     waterMat.color.setHSL(0.55, 0.6, 0.4 + Math.sin(t * 0.8) * 0.02)
+    mush.update(t)
   }
 
-  return { update }
+  return { update, platforms, ladders }
 }

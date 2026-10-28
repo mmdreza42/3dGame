@@ -1,7 +1,35 @@
+// Weapon tuning.
+//  hipSpread / moveSpread : cone half-angle (radians) when firing from the hip / extra while moving
+//  adsSpread              : cone half-angle while aiming down sights
+//  adsFov / adsSpeed      : zoom level and how fast the aim transition is
+//  adsMove                : walk speed while aiming
+//  recoil                 : camera pitch kick per shot (radians), recovers on its own
+//  kickZ / kickRot        : visual kick of the gun model
 export const WEAPON_CONFIG = {
-  pistol:  { maxAmmo: 12, damage: 50,  fireRate: 200,  reloadTime: 1500, color: 0x00ffff, speed: 120, bullets: 1, spreadHip: 0.015, spreadAds: 0.001, recoilPitch: 0.015, recoilYaw: 0.005, recoilKickBack: 0.05, recoverySpeed: 15, auto: true, bloomPerShot: 0.005 },
-  shotgun: { maxAmmo: 6,  damage: 25,  fireRate: 800,  reloadTime: 2500, color: 0xffff00, speed: 120, bullets: 5, spreadHip: 0.08,  spreadAds: 0.06,  recoilPitch: 0.05,  recoilYaw: 0.02,  recoilKickBack: 0.15, recoverySpeed: 10, auto: false, bloomPerShot: 0.02 },
-  sniper:  { maxAmmo: 4,  damage: 150, fireRate: 1500, reloadTime: 3000, color: 0xff00ff, speed: 250, bullets: 1, spreadHip: 0.05,  spreadAds: 0.0005, recoilPitch: 0.08,  recoilYaw: 0.01,  recoilKickBack: 0.2, recoverySpeed: 8, auto: false, bloomPerShot: 0.05 }
+  pistol: {
+    maxAmmo: 12, damage: 50, fireRate: 200, reloadTime: 1500, color: 0x00ffff, speed: 120, bullets: 1,
+    hipSpread: 0.012, moveSpread: 0.03, adsSpread: 0,
+    adsFov: 55, adsSpeed: 14, adsMove: 3.5,
+    recoil: 0.012, kickZ: 0.04, kickRot: 0.09, shake: 0.03, fovKick: 2, bloom: 0.006,
+    flashSize: 1, flashLight: 0.5, ejectDelay: 0,
+    tracer: { color: 0xffd890, len: 2.5, radius: 0.012 }
+  },
+  shotgun: {
+    maxAmmo: 6, damage: 25, fireRate: 800, reloadTime: 2500, color: 0xffff00, speed: 120, bullets: 5,
+    hipSpread: 0.1, moveSpread: 0.02, adsSpread: 0.03,
+    adsFov: 58, adsSpeed: 11, adsMove: 3.2,
+    recoil: 0.05, kickZ: 0.1, kickRot: 0.2, shake: 0.075, fovKick: 4, bloom: 0,
+    flashSize: 1.4, flashLight: 1, ejectDelay: 350,
+    tracer: { color: 0xffb060, len: 1.6, radius: 0.01 }
+  },
+  sniper: {
+    maxAmmo: 4, damage: 150, fireRate: 1500, reloadTime: 3000, color: 0xff00ff, speed: 250, bullets: 1,
+    hipSpread: 0.05, moveSpread: 0.06, adsSpread: 0,
+    adsFov: 18, adsSpeed: 8, adsMove: 2,
+    recoil: 0.07, kickZ: 0.13, kickRot: 0.25, shake: 0.12, fovKick: 6, bloom: 0,
+    flashSize: 1.6, flashLight: 1.5, ejectDelay: 450,
+    tracer: { color: 0xffc8ff, len: 5, radius: 0.014 }
+  }
 }
 export const weaponAmmo = { pistol: 12, shotgun: 6, sniper: 4 }
 

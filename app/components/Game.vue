@@ -10,6 +10,9 @@
         <span v-if="isReloading" style="color:#ffaa00;">RELOADING...</span>
         <span v-else>{{ currentAmmo }} / {{ maxAmmo }}</span>
       </div>
+      <div style="display:flex;gap:12px;margin-top:6px;font-size:13px;">
+        <span v-for="(w, i) in WEAPON_LIST" :key="w" :style="{ color: currentWeapon === w ? '#00ffff' : '#6a7a8a' }">{{ i + 1 }} {{ w.toUpperCase() }}</span>
+      </div>
       <div v-if="overchargeTimer > 0" style="font-size:16px;color:#ff00ff;margin-top:4px;">⚡ OVERCHARGE: {{ Math.ceil(overchargeTimer) }}s</div>
       <div v-if="comboCount > 1" style="font-size:22px;color:#ffd700;margin-top:4px;text-shadow:0 0 10px #ffd700;">🔥 COMBO x{{ comboCount }}</div>
     </div>
@@ -32,29 +35,30 @@
 
     <div v-if="gameState === 'playing'" style="position:fixed; top:20px; right:20px; width:200px; height:200px; border:2px solid #00ffff; pointer-events:none; z-index:5; background:rgba(0,0,0,0.6); box-shadow: 0 0 15px rgba(0,255,255,0.3);"></div>
 
-    <div v-if="gameState === 'playing' && !isAiming" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:20;display:flex;align-items:center;justify-content:center;">
-      <div style="width:6px;height:6px;background:#00ffff;border-radius:50%;box-shadow:0 0 8px #00ffff;"></div>
-      <div v-if="hitmarker" style="position:absolute;width:24px;height:24px;">
-        <div :style="{position:'absolute',width:'100%',height:'3px',background:hitmarkerColor,transform:'rotate(45deg)',top:'11px',boxShadow:'0 0 8px '+hitmarkerColor}"></div>
-        <div :style="{position:'absolute',width:'100%',height:'3px',background:hitmarkerColor,transform:'rotate(-45deg)',top:'11px',boxShadow:'0 0 8px '+hitmarkerColor}"></div>
-      </div>
+    <!-- Hip crosshair: the four ticks open up with your current spread (moving, jumping, rapid fire) -->
+    <div v-if="gameState === 'playing' && !isAiming" style="position:fixed;top:50%;left:50%;width:0;height:0;pointer-events:none;z-index:20;">
+      <div style="position:absolute;left:-1.5px;top:-1.5px;width:3px;height:3px;background:#fff;border-radius:50%;box-shadow:0 0 4px #00ffff;"></div>
+      <div v-for="t in crossTicks" :key="t.k" :style="{ position: 'absolute', background: '#00ffff', boxShadow: '0 0 3px #000, 0 0 6px #00ffff', ...t.s }"></div>
     </div>
 
-    <div v-if="gameState === 'playing' && isAiming && currentWeapon === 'sniper'" style="position:fixed;inset:0;pointer-events:none;z-index:20;">
-      <div style="position:absolute;inset:0;background:radial-gradient(circle, transparent 30%, black 31%);"></div>
-      <div style="position:absolute;top:50%;left:0;right:0;height:2px;background:black;transform:translateY(-50%);"></div>
-      <div style="position:absolute;top:0;bottom:0;left:50%;width:2px;background:black;transform:translateX(-50%);"></div>
+    <!-- Iron sights / red dot while aiming (not scoped) -->
+    <div v-if="gameState === 'playing' && isAiming && !scopeVisible" style="position:fixed;top:50%;left:50%;width:4px;height:4px;transform:translate(-50%,-50%);background:rgba(255,40,40,0.85);border-radius:50%;box-shadow:0 0 6px red;pointer-events:none;z-index:20;"></div>
+
+    <!-- Sniper scope -->
+    <div v-if="gameState === 'playing' && scopeVisible" style="position:fixed;inset:0;pointer-events:none;z-index:20;">
+      <div style="position:absolute;inset:0;background:radial-gradient(circle at 50% 50%, transparent 0, transparent 30vmin, #000 30.4vmin);"></div>
+      <div style="position:absolute;top:50%;left:calc(50% - 30vmin);width:60vmin;height:1px;background:rgba(0,0,0,0.9);"></div>
+      <div style="position:absolute;left:50%;top:calc(50% - 30vmin);height:60vmin;width:1px;background:rgba(0,0,0,0.9);"></div>
       <div style="position:absolute;top:50%;left:50%;width:4px;height:4px;background:red;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 10px red;"></div>
-      <div v-if="hitmarker" style="position:absolute;top:50%;left:50%;width:24px;height:24px;transform:translate(-50%,-50%);">
-        <div :style="{position:'absolute',width:'100%',height:'3px',background:hitmarkerColor,transform:'rotate(45deg)',top:'11px',boxShadow:'0 0 8px '+hitmarkerColor}"></div>
-        <div :style="{position:'absolute',width:'100%',height:'3px',background:hitmarkerColor,transform:'rotate(-45deg)',top:'11px',boxShadow:'0 0 8px '+hitmarkerColor}"></div>
-      </div>
     </div>
 
-    <div v-if="gameState === 'playing' && isAiming && currentWeapon !== 'sniper' && hitmarker" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:20;width:24px;height:24px;">
+    <div v-if="gameState === 'playing' && hitmarker" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:21;width:24px;height:24px;">
       <div :style="{position:'absolute',width:'100%',height:'3px',background:hitmarkerColor,transform:'rotate(45deg)',top:'11px',boxShadow:'0 0 8px '+hitmarkerColor}"></div>
       <div :style="{position:'absolute',width:'100%',height:'3px',background:hitmarkerColor,transform:'rotate(-45deg)',top:'11px',boxShadow:'0 0 8px '+hitmarkerColor}"></div>
     </div>
+
+    <!-- Ladder prompt -->
+    <div v-if="gameState === 'playing' && climbPrompt" style="position:fixed;top:58%;left:50%;transform:translateX(-50%);z-index:21;pointer-events:none;font:bold 18px 'Courier New', monospace;color:#00ffff;text-shadow:0 0 10px #00ffff,0 2px 4px #000;background:rgba(0,0,0,0.45);padding:6px 14px;border:1px solid #00ffff;white-space:nowrap;">{{ climbPrompt }}</div>
 
     <div v-if="showHitDir" style="position:fixed;inset:0;pointer-events:none;z-index:18;">
       <div :style="{position:'absolute',top:'50%',left:'50%',transform:`rotate(${hitDirAngle}rad)`}">
@@ -62,7 +66,6 @@
       </div>
     </div>
 
-    <!-- FIXED: Damage screen is less intrusive -->
     <div v-if="isHurt" style="position:fixed;inset:0;background:radial-gradient(circle, transparent 50%, rgba(255,0,0,0.6) 100%);pointer-events:none;z-index:20;"></div>
 
     <!-- SHOP -->
@@ -95,8 +98,10 @@
       <h1 v-if="gameState === 'dead'" style="font-size:64px;margin:0;color:#ff0055;text-shadow:0 0 20px #ff0055;">YOU DIED</h1>
       <p v-if="gameState === 'menu' && highScore > 0" style="color:#ffd700;margin-top:10px;font-size:20px;">HIGH SCORE: {{ highScore }}</p>
       <p v-if="gameState === 'dead' && score >= highScore && score > 0" style="color:#ffd700;margin-top:10px;font-size:20px;">🏆 NEW HIGH SCORE!</p>
-      <p v-if="gameState === 'menu'" style="font-size:18px;color:#aaa;margin-top:20px;max-width:420px;text-align:center;line-height:1.6;">
-        WASD • Mouse look • Shift sprint • LMB shoot • RMB aim • R reload<br>
+      <p v-if="gameState === 'menu'" style="font-size:18px;color:#aaa;margin-top:20px;max-width:460px;text-align:center;line-height:1.6;">
+        WASD • Mouse look • Shift sprint • Space jump<br>
+        LMB shoot (hold to keep firing) • Hold RMB to aim • R reload • 1/2/3 weapons<br>
+        E (or W at the foot) climbs watchtower ladders<br>
         Headshots deal 2x damage • Tank weakpoints deal 3x<br>
         Waves are endless — survive as long as you can.
       </p>
@@ -123,8 +128,10 @@ import { WEAPON_CONFIG, weaponAmmo, ENEMY_CONFIG } from '../game/config.js'
 import { CinematicShader } from '../game/shader.js'
 import { initAudio, playSound } from '../game/audio.js'
 import { buildWorld } from '../game/world.js'
-import { buildPistol, buildShotgun, buildSniper } from '../game/weapons.js'
+import { buildGuns } from '../game/guns.js'
 import { enemyExtras, buildEnemyMesh, updateEnemyVisuals, hideEnemyExtras } from '../game/enemies.js'
+
+const WEAPON_LIST = ['pistol', 'shotgun', 'sniper']
 
 const root = ref(null)
 const playerHp = ref(100)
@@ -152,7 +159,20 @@ const announceVisible = ref(false)
 const killFeed = ref([])
 const hitDirAngle = ref(0)
 const showHitDir = ref(false)
+const climbPrompt = ref('')
+const crossGap = ref(12)
+const scopeVisible = ref(false)
 const highScore = ref(parseInt(localStorage.getItem('nexus_highscore') || '0'))
+
+const crossTicks = computed(() => {
+  const g = crossGap.value, L = 9
+  return [
+    { k: 't', s: { left: '-1px', top: `${-g - L}px`, width: '2px', height: `${L}px` } },
+    { k: 'b', s: { left: '-1px', top: `${g}px`, width: '2px', height: `${L}px` } },
+    { k: 'l', s: { top: '-1px', left: `${-g - L}px`, width: `${L}px`, height: '2px' } },
+    { k: 'r', s: { top: '-1px', left: `${g}px`, width: `${L}px`, height: '2px' } }
+  ]
+})
 
 let renderer, frame, onResize, onKeyDown, onKeyUp, onMouseMove, onMouseDown, onMouseUp, onPointerLockChange, onContextMenu
 let scene, camera, miniMapCamera
@@ -160,7 +180,7 @@ let composer, bloomPass, rgbShiftPass, smaaPass, vignettePass, outputPass
 let soldier = null
 let world = null
 let groundMesh = null
-let explosionLight = null // FIXED: Reusable light for explosions
+let explosionLight = null
 let explosionTimer = 0
 
 const playerLasers = [], enemyBullets = [], particles = [], ragdolls = [], lootItems = [], damageNumbers = []
@@ -168,28 +188,20 @@ const keys = {}
 const me = { x: 0, z: 0, ry: 0 }
 let verticalVel = 0, isGrounded = true
 
-let muzzleLight, muzzleFlash, weapons = {}
-let mouseHeld = false, bloom = 0, equipTime = 0
-const _rayOrigin = new THREE.Vector3(), _rayDir = new THREE.Vector3(), _aimPoint = new THREE.Vector3(), _muzzlePos = new THREE.Vector3()
-const HIP_POS = {
-  pistol: new THREE.Vector3(0.15, -0.15, -0.35),
-  shotgun: new THREE.Vector3(0.15, -0.18, -0.4),
-  sniper: new THREE.Vector3(0.15, -0.18, -0.4)
-}
-const ADS_POS = {
-  pistol: new THREE.Vector3(0, -0.0915, -0.3),
-  shotgun: new THREE.Vector3(0, -0.087, -0.3),
-  sniper: new THREE.Vector3(0, -0.07, -0.3)
-}
-
-const gunCurrentPos = new THREE.Vector3(0, 0, 0)
-const gunRot = new THREE.Vector3(0, 0, 0)
+// ---- weapon / view model state ----
+let guns = null, activeGun = null
 const gunSway = new THREE.Vector3(0, 0, 0)
 let moveBobTime = 0, currentMoveAmount = 0, lastShootTime = 0, cameraShake = 0
 let landingKick = 0, fovKick = 0
-let rmbHeld = false, adsBlend = 0, adsEase = 0
-const BASE_FOV = 70
-const adsFov = () => currentWeapon.value === 'sniper' ? 20 : currentWeapon.value === 'shotgun' ? 55 : 50
+let adsT = 0, sprintT = 0, swapT = 0, flashT = 0, cycleT = 0
+let kickZ = 0, kickRot = 0, recoilAccum = 0, bloom = 0
+let reloadStart = 0, reloadDur = 1
+let rmbDown = false, lmbDown = false
+let fovBase = 70, sensMul = 1, camRoll = 0
+let prevRy = 0, prevPitch = 0
+
+// ---- ladders / platforms ----
+let climbing = null, ladders = [], platforms = []
 
 const obstacles = [], barrels = []
 let enemies = []
@@ -197,6 +209,14 @@ const groundRaycaster = new THREE.Raycaster()
 
 let hurtTimer = null, hitmarkerTimer = null, hitDirTimer = null, announceTimer = null
 let reloadToken = 0
+
+const _up = new THREE.Vector3(0, 1, 0)
+const _camDir = new THREE.Vector3()
+const _cp = new THREE.Vector3()
+const _aimRay = new THREE.Raycaster()
+const _aimHit = new THREE.Vector3()
+
+const smooth = (t) => t * t * (3 - 2 * t)
 
 function spawnDamageNumber(pos, damage, color = '#ff5555', scale = 1) {
   const canvas = document.createElement('canvas')
@@ -230,12 +250,13 @@ function announce(text, sub = '', duration = 1500) {
   announceTimer = setTimeout(() => { announceVisible.value = false }, duration)
 }
 
+// Line of sight now checks height too, so enemies can see (and shoot) a player standing on a tower
 const _losRay = new THREE.Raycaster()
-function hasLineOfSight(fromX, fromZ, toX, toZ) {
-  const dx = toX - fromX, dz = toZ - fromZ
-  const dist = Math.sqrt(dx * dx + dz * dz)
+function hasLineOfSight(fromX, fromZ, toX, toZ, toY = 1.5) {
+  const dx = toX - fromX, dy = toY - 1.5, dz = toZ - fromZ
+  const dist = Math.sqrt(dx * dx + dy * dy + dz * dz)
   if (dist < 0.1) return true
-  _losRay.set(new THREE.Vector3(fromX, 1.5, fromZ), new THREE.Vector3(dx / dist, 0, dz / dist))
+  _losRay.set(new THREE.Vector3(fromX, 1.5, fromZ), new THREE.Vector3(dx / dist, dy / dist, dz / dist))
   _losRay.far = dist
   return _losRay.intersectObjects(obstacles, true).length === 0
 }
@@ -257,7 +278,7 @@ function damagePlayer(amount, sx, sz) {
   playerHp.value -= amount
   triggerHurt(); triggerHitDirection(sx, sz)
   cameraShake = Math.max(cameraShake, 0.15)
-  rgbShiftPass.uniforms['amount'].value = 0.005 // FIXED: Much lower RGB shift
+  rgbShiftPass.uniforms['amount'].value = 0.005
   playSound('hurt')
   if (comboCount.value > 1) { comboCount.value = 1; addKillFeed('💔 Combo Broken') }
   if (playerHp.value <= 0) checkDeath()
@@ -269,6 +290,8 @@ function reloadWeapon() {
   if (currentAmmo.value === cfg.maxAmmo) return
   isReloading.value = true
   playSound('reload')
+  reloadStart = performance.now()
+  reloadDur = cfg.reloadTime / reloadMult.value
   const weaponAtStart = currentWeapon.value
   const myToken = ++reloadToken
   setTimeout(() => {
@@ -276,7 +299,7 @@ function reloadWeapon() {
     isReloading.value = false
     weaponAmmo[currentWeapon.value] = cfg.maxAmmo
     currentAmmo.value = cfg.maxAmmo
-  }, cfg.reloadTime / reloadMult.value)
+  }, reloadDur)
 }
 
 function buyUpgrade(type) {
@@ -285,14 +308,7 @@ function buyUpgrade(type) {
   else if (type === 'reload' && scrap.value >= 200) { scrap.value -= 200; reloadMult.value += 0.20; playSound('reload') }
 }
 
-function safePointerLock() {
-  try {
-    const p = renderer.domElement.requestPointerLock();
-    if (p && p.catch) p.catch(() => {});
-  } catch (e) {}
-}
-
-function startNextWave() { wave.value++; adsBlend = 0; adsEase = 0; rmbHeld = false; gameState.value = 'playing'; renderer.domElement.requestPointerLock().catch(()=>{}); spawnWave() }
+function startNextWave() { wave.value++; climbing = null; gameState.value = 'playing'; renderer.domElement.requestPointerLock(); spawnWave() }
 
 function spawnParticles(pos, color, count) {
   for (let i = 0; i < count; i++) {
@@ -304,107 +320,273 @@ function spawnParticles(pos, color, count) {
   }
 }
 
+// ======================= WEAPONS =======================
+
+function equipGun(name) {
+  if (!guns) return
+  for (const k in guns.models) {
+    const g = guns.models[k]
+    g.group.visible = k === name
+    if (g.cycle) g.cycle.position.z = g.cycleBaseZ
+  }
+  activeGun = guns.models[name]
+  activeGun.muzzle.add(guns.flash, guns.light)
+  guns.flash.visible = false
+  guns.light.intensity = 0
+  cycleT = 0; flashT = 0
+}
+
+function switchWeapon(name) {
+  if (currentWeapon.value === name || !guns) return
+  weaponAmmo[currentWeapon.value] = currentAmmo.value
+  currentWeapon.value = name
+  currentAmmo.value = weaponAmmo[name]
+  maxAmmo.value = WEAPON_CONFIG[name].maxAmmo
+  isReloading.value = false
+  reloadToken++
+  equipGun(name)
+  swapT = 1
+}
+
+// Where the crosshair is pointing: nearest wall/obstacle or enemy along the view ray
+function getAimPoint(dir) {
+  _aimRay.set(camera.position, dir)
+  _aimRay.far = 200
+  let dist = 200
+  const wall = _aimRay.intersectObjects(obstacles, true)[0]
+  if (wall) dist = wall.distance
+  for (const e of enemies) {
+    if (e.dead) continue
+    const m = scene.getObjectByName(e.id)
+    if (!m) continue
+    if (_aimRay.ray.intersectBox(enemyHitBox(m, e), _aimHit)) {
+      const d = _aimHit.distanceTo(camera.position)
+      if (d < dist) dist = d
+    }
+  }
+  return { point: camera.position.clone().addScaledVector(dir, dist), dist }
+}
+
+// Cone half-angle (radians) of the current shot spread. Also drives the crosshair gap.
+function currentSpread() {
+  const cfg = WEAPON_CONFIG[currentWeapon.value]
+  const k = smooth(adsT)
+  const hip = cfg.hipSpread + cfg.moveSpread * currentMoveAmount + bloom + (isGrounded ? 0 : 0.03)
+  return hip + (cfg.adsSpread - hip) * k
+}
+
+function ejectShell() {
+  if (!activeGun || !camera) return
+  const p = new THREE.Vector3()
+  activeGun.eject.getWorldPosition(p)
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion)
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion)
+  const shell = new THREE.Mesh(
+    new THREE.BoxGeometry(0.012, 0.012, 0.034),
+    new THREE.MeshStandardMaterial({ color: 0xd9a441, metalness: 0.9, roughness: 0.3 })
+  )
+  shell.position.copy(p)
+  shell.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3)
+  shell.userData.vel = right.multiplyScalar(2 + Math.random() * 1.5).addScaledVector(up, 1.5 + Math.random())
+  shell.userData.life = 0.7
+  shell.userData.spin = 20
+  scene.add(shell); particles.push(shell)
+}
+
 function shoot() {
-  if (isReloading.value) return
+  if (isReloading.value || climbing || !activeGun) return
   const cfg = WEAPON_CONFIG[currentWeapon.value]
   const now = performance.now()
   let fireRate = cfg.fireRate
   if (overchargeTimer.value > 0) fireRate *= 0.5
   if (now - lastShootTime < fireRate) return
-  if (currentAmmo.value <= 0) { playSound('empty'); return }
+  if (currentAmmo.value <= 0) { playSound('empty'); lastShootTime = now; reloadWeapon(); return }
 
   lastShootTime = now
   currentAmmo.value--
   weaponAmmo[currentWeapon.value] = currentAmmo.value
   const isCrit = overchargeTimer.value > 0
   const damage = cfg.damage * damageMult.value * (isCrit ? 2 : 1)
+  const k = smooth(adsT)
 
-  // 1. Compute aim point
-  _rayOrigin.copy(camera.position)
-  camera.getWorldDirection(_rayDir)
-  const raycaster = new THREE.Raycaster(_rayOrigin, _rayDir, 0, 300)
-  raycaster.camera = camera // Fix: Sprites (enemy health bars) need the camera to raycast
-  const hitObs = raycaster.intersectObjects(obstacles, true)
-  const enemyMeshes = []
-  for (const e of enemies) { if (!e.dead) { const m = scene.getObjectByName(e.id); if (m) enemyMeshes.push(m) } }
-  const hitEnemies = raycaster.intersectObjects(enemyMeshes, true)
-  
-  let hitDist = 300
-  if (hitObs.length > 0) hitDist = Math.min(hitDist, hitObs[0].distance)
-  if (hitEnemies.length > 0) hitDist = Math.min(hitDist, hitEnemies[0].distance)
-  
-  if (hitDist < 300) _aimPoint.copy(_rayOrigin).add(_rayDir.clone().multiplyScalar(hitDist))
-  else _aimPoint.copy(_rayOrigin).add(_rayDir.clone().multiplyScalar(200))
+  // make sure the view is current, otherwise we'd shoot where we were looking a frame ago
+  camera.rotation.y = me.ry
+  camera.updateMatrixWorld(true)
+  camera.getWorldDirection(_camDir)
+  const aim = getAimPoint(_camDir)
 
-  // 2. Muzzle position
-  weapons[currentWeapon.value].muzzle.getWorldPosition(_muzzlePos)
-  if (isBlocked(_muzzlePos.x, _muzzlePos.z, 0.5, _muzzlePos.y)) {
-    _muzzlePos.copy(camera.position)
-  }
+  // Bullets leave the muzzle and fly to the point under the crosshair. While aiming, or when a
+  // wall is right in front of us, they start at the eye so you never shoot "into" your own gun.
+  const origin = new THREE.Vector3()
+  if (aim.dist < 1.8 || k > 0.6) origin.copy(camera.position).addScaledVector(_camDir, Math.min(0.6, aim.dist * 0.5))
+  else activeGun.muzzle.getWorldPosition(origin)
 
-  // 3. Spread
-  const currentSpread = THREE.MathUtils.lerp(cfg.spreadHip, cfg.spreadAds, adsEase)
-  let finalSpread = currentSpread * (1 - adsEase * 0.9) + bloom
-  if (keys.ShiftLeft || keys.ShiftRight || !isGrounded) finalSpread *= 1.5
-
-  // 4. Bloom
-  bloom = Math.min(bloom + cfg.bloomPerShot, 0.1)
-
-  // 5. Circular cone spread basis
-  const forward = _aimPoint.clone().sub(_muzzlePos).normalize()
-  const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize()
-  if (right.lengthSq() < 0.001) right.set(1, 0, 0)
-  const up = new THREE.Vector3().crossVectors(right, forward).normalize()
+  const base = aim.point.clone().sub(origin).normalize()
+  const right = new THREE.Vector3().crossVectors(base, _up)
+  if (right.lengthSq() < 1e-6) right.set(1, 0, 0)
+  right.normalize()
+  const upv = new THREE.Vector3().crossVectors(right, base).normalize()
+  const spread = currentSpread()
 
   for (let i = 0; i < cfg.bullets; i++) {
-    const shootDir = forward.clone()
-    if (finalSpread > 0) {
-      const angle = Math.random() * Math.PI * 2
-      const radius = Math.sqrt(Math.random()) * finalSpread
-      shootDir.addScaledVector(right, Math.cos(angle) * radius)
-      shootDir.addScaledVector(up, Math.sin(angle) * radius)
-      shootDir.normalize()
+    const shootDir = base.clone()
+    if (spread > 0) {
+      const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * spread
+      shootDir.addScaledVector(right, Math.cos(a) * r).addScaledVector(upv, Math.sin(a) * r).normalize()
     }
-    
-    const laserGeo = new THREE.CylinderGeometry(0.02, 0.02, 3, 6)
+    const t = cfg.tracer
+    const laserGeo = new THREE.CylinderGeometry(t.radius, t.radius, t.len, 6)
     laserGeo.rotateX(Math.PI / 2)
-    const laserMat = new THREE.MeshBasicMaterial({ color: 0xffd890, transparent: true, opacity: 0.8 })
+    const laserMat = new THREE.MeshBasicMaterial({ color: t.color, transparent: true, opacity: 0.85 })
     const laser = new THREE.Mesh(laserGeo, laserMat)
-    laser.position.copy(_muzzlePos).add(shootDir.clone().multiplyScalar(1.5))
+    laser.position.copy(origin).addScaledVector(shootDir, t.len * 0.5)
     laser.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), shootDir)
     scene.add(laser)
     playerLasers.push({ mesh: laser, geo: laserGeo, mat: laserMat, vel: shootDir.clone().multiplyScalar(cfg.speed), life: 1.5, damage, color: cfg.color, crit: isCrit })
   }
 
   playSound(currentWeapon.value)
-  
-  muzzleLight.position.copy(_muzzlePos)
-  muzzleLight.intensity = currentWeapon.value === 'shotgun' ? 1 : currentWeapon.value === 'sniper' ? 1.5 : 0.5
-  
-  muzzleFlash.position.copy(_muzzlePos)
-  muzzleFlash.rotation.z = Math.random() * Math.PI
-  muzzleFlash.scale.setScalar(0.8 + Math.random() * 0.4)
-  muzzleFlash.visible = true
-  muzzleFlash.material.color.setHex(0xffc060)
-  
-  setTimeout(() => { muzzleLight.intensity = 0; if (muzzleFlash) muzzleFlash.visible = false }, 50)
 
-  const recoil = currentWeapon.value === 'sniper' ? 0.4 : currentWeapon.value === 'shotgun' ? 0.25 : 0.1
-  gunCurrentPos.z += recoil
-  gunRot.x += recoil * 1.5
-  gunRot.y += (Math.random() - 0.5) * recoil
-  cameraShake = recoil * 0.3
-  fovKick = 6
+  // muzzle flash (small while aiming so it doesn't blind you)
+  guns.flash.visible = true
+  guns.flash.rotation.z = Math.random() * Math.PI
+  guns.flash.scale.setScalar(cfg.flashSize * (1 - 0.75 * k) * (0.85 + Math.random() * 0.3))
+  guns.light.intensity = cfg.flashLight
+  flashT = 0.05
+  cycleT = 1                                   // slide / pump / bolt animation
+  setTimeout(ejectShell, cfg.ejectDelay)
 
-  if (currentAmmo.value <= 0) reloadWeapon()
+  // recoil: camera kicks up and then settles back, gun model kicks back
+  const rk = cfg.recoil * (1 - 0.35 * k)
+  camera.rotation.x += rk
+  recoilAccum += rk
+  me.ry += (Math.random() - 0.5) * rk * 0.8
+  kickZ += cfg.kickZ * (1 - 0.4 * k)
+  kickRot += cfg.kickRot * (1 - 0.4 * k)
+  cameraShake = Math.max(cameraShake, cfg.shake)
+  fovKick = cfg.fovKick * (1 - 0.6 * k)
+  bloom = Math.min(0.04, bloom + cfg.bloom)
 }
+
+// Moves the gun model every frame: hip/ADS blend, sway, bob, sprint pose, reload, weapon swap, recoil
+function updateViewModel(dt, now, k, moving, sprinting) {
+  const g = activeGun
+  if (!g) return
+
+  const dRy = THREE.MathUtils.clamp(me.ry - prevRy, -0.15, 0.15)
+  const dPitch = THREE.MathUtils.clamp(camera.rotation.x - prevPitch, -0.15, 0.15)
+  prevRy = me.ry; prevPitch = camera.rotation.x
+  gunSway.x += dRy * 0.05
+  gunSway.y += dPitch * 0.05
+  const decay = Math.pow(0.85, dt * 60)
+  gunSway.x *= decay; gunSway.y *= decay
+  const swayK = 1 - 0.8 * k
+
+  moveBobTime += dt * (moving ? (sprinting ? 14 : 9.5) : 1.6)
+  currentMoveAmount += ((moving ? 1 : 0) - currentMoveAmount) * Math.min(1, dt * 10)
+  const bobK = currentMoveAmount * (1 - 0.9 * k) * (sprinting ? 1.6 : 1)
+  const bobX = Math.cos(moveBobTime) * 0.012 * bobK
+  const bobY = Math.sin(moveBobTime * 2) * 0.009 * bobK
+  const breathe = Math.sin(now * 0.0017) * 0.0015 * (1 - currentMoveAmount) * (1 - 0.7 * k)
+
+  kickZ += (0 - kickZ) * Math.min(1, dt * 14)
+  kickRot += (0 - kickRot) * Math.min(1, dt * 12)
+  swapT = Math.max(0, swapT - dt * 4.5)
+  flashT = Math.max(0, flashT - dt)
+  guns.flash.visible = flashT > 0
+  if (flashT <= 0) guns.light.intensity = 0
+
+  if (g.cycle) {
+    let off = 0
+    if (cycleT > 0) {
+      cycleT = Math.max(0, cycleT - dt / g.cycleTime)
+      const prog = THREE.MathUtils.clamp((1 - cycleT - g.cycleDelay) / (1 - g.cycleDelay), 0, 1)
+      off = Math.sin(Math.PI * prog) * g.cycleDist
+    }
+    g.cycle.position.z = g.cycleBaseZ + off
+  }
+
+  let reloadPose = 0
+  if (isReloading.value) reloadPose = Math.sin(Math.min(1, (now - reloadStart) / reloadDur) * Math.PI)
+
+  g.group.position.set(
+    THREE.MathUtils.lerp(g.hip.x, g.ads.x, k) + bobX + gunSway.x * swayK - 0.05 * sprintT,
+    THREE.MathUtils.lerp(g.hip.y, g.ads.y, k) + bobY + breathe + gunSway.y * swayK - 0.07 * sprintT - 0.17 * reloadPose - 0.28 * swapT,
+    THREE.MathUtils.lerp(g.hip.z, g.ads.z, k) + kickZ + 0.04 * sprintT
+  )
+  g.group.rotation.set(
+    gunSway.y * 2 * swayK + kickRot - 0.5 * sprintT - 0.5 * reloadPose - 0.9 * swapT,
+    gunSway.x * 2 * swayK + 0.55 * sprintT + 0.25 * reloadPose,
+    0.3 * reloadPose - 0.25 * sprintT
+  )
+
+  // the scoped sniper model would fill the screen, so hide it once the scope overlay is up
+  g.group.visible = !(currentWeapon.value === 'sniper' && adsT > 0.9)
+}
+
+// ======================= LADDERS / PLATFORMS =======================
+
+function platformAt(x, z, feetY) {
+  let best = null
+  for (const p of platforms) {
+    if (Math.abs(x - p.x) <= p.hw && Math.abs(z - p.z) <= p.hd && p.y <= feetY + 0.5 && (!best || p.y > best.y)) best = p
+  }
+  return best
+}
+function floorAt(x, z, feetY) { return platformAt(x, z, feetY)?.y ?? 0 }
+
+function findLadder() {
+  if (climbing) return null
+  const feetY = camera.position.y - 1.6
+  for (const L of ladders) {
+    if (Math.abs(me.x - L.x) > 0.9) continue
+    const dz = me.z - L.z                       // > 0 means in front of the ladder (outside the tower)
+    if (feetY < 1.2 && dz > 0 && dz < 1.8) return { L, fromTop: false }
+    if (Math.abs(feetY - L.top) < 0.7 && dz > -1.6 && dz < 0.4) return { L, fromTop: true }
+  }
+  return null
+}
+function attachLadder(L, fromTop) {
+  climbing = L
+  verticalVel = 0; isGrounded = false; landingKick = 0
+  me.x = L.x; me.z = L.z + 0.55
+  if (fromTop) camera.position.y = L.top - 0.35 + 1.6
+}
+function leaveLadder(jump) {
+  if (!climbing) return
+  const L = climbing
+  climbing = null
+  isGrounded = false
+  verticalVel = jump ? 6 : 0
+  if (jump) me.z = L.z + 0.9
+}
+function updateClimb(dt) {
+  const L = climbing
+  const dy = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0)
+  const spd = (keys.ShiftLeft || keys.ShiftRight) ? 5 : 3
+  me.x = L.x; me.z = L.z + 0.55
+  verticalVel = 0; landingKick = 0
+  camera.position.y += dy * spd * dt
+  const feet = camera.position.y - 1.6
+  if (dy > 0 && feet >= L.top) {                // top: step onto the deck
+    me.z = L.z - 1.0
+    camera.position.y = L.top + 1.6
+    climbing = null; isGrounded = true
+  } else if (dy < 0 && feet <= L.bottom) {      // bottom: step off
+    camera.position.y = L.bottom + 1.6
+    me.z = L.z + 1.2
+    climbing = null; isGrounded = true
+  }
+}
+
+// ======================= ENEMIES / GAME FLOW =======================
 
 function killEnemy(enemy, isHeadshot = false) {
   const mesh = scene.getObjectByName(enemy.id)
   if (!mesh) return
   if (mesh.userData.mixer) mesh.userData.mixer.stopAllAction()
   hideEnemyExtras(mesh)
-  
+
   const isCartoon = enemy.type !== 'boss'
 
   if (isCartoon) {
@@ -414,18 +596,18 @@ function killEnemy(enemy, isHeadshot = false) {
     })
   } else {
     const impulseDir = new THREE.Vector3(enemy.x - me.x, 0, enemy.z - me.z).normalize()
-    ragdolls.push({ 
+    ragdolls.push({
       mesh, cartoon: false,
-      vx: impulseDir.x * 15 + (Math.random() - 0.5) * 10, 
-      vy: Math.random() * 12 + 5, 
-      vz: impulseDir.z * 15 + (Math.random() - 0.5) * 10, 
-      rx: (Math.random() - 0.5) * 20, ry: (Math.random() - 0.5) * 20, rz: (Math.random() - 0.5) * 20, 
-      life: 4.0 
+      vx: impulseDir.x * 15 + (Math.random() - 0.5) * 10,
+      vy: Math.random() * 12 + 5,
+      vz: impulseDir.z * 15 + (Math.random() - 0.5) * 10,
+      rx: (Math.random() - 0.5) * 20, ry: (Math.random() - 0.5) * 20, rz: (Math.random() - 0.5) * 20,
+      life: 4.0
     })
   }
 
   if (enemy.type === 'boss') { spawnParticles(mesh.position, 0xffaa00, 40); cameraShake = 0.6 }
-  
+
   const names = { normal: 'Soldier', runner: 'Runner', tank: 'Tank', sniper: 'Sniper', bomber: 'Bomber', elite: 'Elite', boss: 'BOSS' }
   const comboTag = comboCount.value > 1 ? ` [x${comboCount.value}]` : ''
   const hsTag = isHeadshot ? ' 🎯' : ''
@@ -457,11 +639,10 @@ function killEnemy(enemy, isHeadshot = false) {
 function explode(x, z) {
   playSound('explosion')
   const pos = new THREE.Vector3(x, 2, z)
-  
-  // FIXED: Reuse the explosion light instead of creating a new one
+
   explosionLight.position.copy(pos)
   explosionLight.intensity = 4
-  explosionTimer = 0.15 // Turn off after 150ms
+  explosionTimer = 0.15
 
   spawnParticles(pos, 0xffaa00, 20)
   cameraShake = 0.3
@@ -475,22 +656,27 @@ function explode(x, z) {
 
 function startGame() {
   initAudio()
+  if (gameState.value === 'paused') { renderer.domElement.requestPointerLock(); return }
   if (gameState.value === 'menu' || gameState.value === 'dead') {
     playerHp.value = 100; maxHp.value = 100
     me.x = 0; me.z = 0; me.ry = 0; camera.rotation.x = 0
+    camera.position.y = 1.6; verticalVel = 0; isGrounded = true; climbing = null
+    adsT = 0; sprintT = 0; recoilAccum = 0; bloom = 0; kickZ = 0; kickRot = 0
+    lmbDown = false; rmbDown = false
     wave.value = 1; score.value = 0; scrap.value = 0
     damageMult.value = 1.0; reloadMult.value = 1.0
-    isReloading.value = false; overchargeTimer.value = 0; rmbHeld = false; adsBlend = 0; adsEase = 0
+    isReloading.value = false; overchargeTimer.value = 0
     comboCount.value = 1
     weaponAmmo.pistol = 12; weaponAmmo.shotgun = 6; weaponAmmo.sniper = 4
     currentWeapon.value = 'pistol'; currentAmmo.value = 12; maxAmmo.value = 12
+    equipGun('pistol'); swapT = 0
     for (const en of enemies) { const m = scene.getObjectByName(en.id); if (m) scene.remove(m) }
     for (const l of lootItems) { scene.remove(l.mesh); l.mesh.geometry.dispose(); l.mesh.material.dispose() }
     for (const l of playerLasers) { scene.remove(l.mesh); l.geo.dispose(); l.mat.dispose() }
     enemies = []; lootItems.length = 0; playerLasers.length = 0
     spawnWave()
     gameState.value = 'playing'
-    safePointerLock()
+    renderer.domElement.requestPointerLock()
   }
 }
 
@@ -564,7 +750,7 @@ function spawnWave() {
 function checkDeath() {
   if (playerHp.value <= 0) {
     gameState.value = 'dead'
-    adsBlend = 0; adsEase = 0; rmbHeld = false
+    climbing = null; lmbDown = false; rmbDown = false
     if (document.pointerLockElement) document.exitPointerLock()
     if (score.value > highScore.value) { highScore.value = score.value; localStorage.setItem('nexus_highscore', score.value.toString()) }
   }
@@ -572,7 +758,7 @@ function checkDeath() {
 
 onMounted(() => {
   scene = new THREE.Scene()
-  
+
   scene.background = new THREE.Color(0x9fc3df)
   scene.fog = new THREE.FogExp2(0xb9cfdb, 0.006)
   const sky = new THREE.Mesh(
@@ -584,18 +770,19 @@ onMounted(() => {
     })
   )
   sky.renderOrder = -1
-  scene.add(sky) 
+  scene.add(sky)
 
-  camera = new THREE.PerspectiveCamera(BASE_FOV, innerWidth / innerHeight, 0.02, 1000)
+  // near plane 0.05 so the gun can sit close to the eye when aiming without being clipped
+  camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 1000)
   camera.rotation.order = 'YXZ'
 
-  renderer = new THREE.WebGLRenderer({ antialias: false }) 
+  renderer = new THREE.WebGLRenderer({ antialias: false })
   renderer.setSize(innerWidth, innerHeight)
   renderer.shadowMap.enabled = true
-  renderer.shadowMap.type = THREE.PCFShadowMap 
+  renderer.shadowMap.type = THREE.PCFShadowMap
   renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = 0.9 
-  
+  renderer.toneMappingExposure = 0.9
+
   root.value.appendChild(renderer.domElement)
   renderer.domElement.style.cursor = 'crosshair'
 
@@ -606,38 +793,33 @@ onMounted(() => {
   // --- SETUP POST PROCESSING PIPELINE ---
   composer = new EffectComposer(renderer)
   composer.addPass(new RenderPass(scene, camera))
-  
-  // 1. Bloom (Toned way down)
+
   bloomPass = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.35, 0.4, 0.8)
   bloomPass.threshold = 1.2
   bloomPass.strength = 0.08
   bloomPass.radius = 0.4
   composer.addPass(bloomPass)
-  
-  // 2. RGB Shift
+
   rgbShiftPass = new ShaderPass(RGBShiftShader)
   rgbShiftPass.uniforms['amount'].value = 0.0
   composer.addPass(rgbShiftPass)
 
-  // 3. Cinematic Vignette
   vignettePass = new ShaderPass(CinematicShader)
   vignettePass.uniforms['intensity'].value = 1.0
   composer.addPass(vignettePass)
 
-  // 4. SMAA
   smaaPass = new SMAAPass(innerWidth * renderer.getPixelRatio(), innerHeight * renderer.getPixelRatio())
   composer.addPass(smaaPass)
 
-  // 5. Output Pass
   outputPass = new OutputPass()
   composer.addPass(outputPass)
 
   // ===== LIGHTING =====
-  const hemiLight = new THREE.HemisphereLight(0xbfd8ff, 0x5a6a3a, 1.2) 
+  const hemiLight = new THREE.HemisphereLight(0xbfd8ff, 0x5a6a3a, 1.2)
   hemiLight.position.set(0, 200, 0)
   scene.add(hemiLight)
 
-  const dirLight = new THREE.DirectionalLight(0xfff1d6, 3.0) 
+  const dirLight = new THREE.DirectionalLight(0xfff1d6, 3.0)
   dirLight.position.set(80, 90, 60)
   dirLight.castShadow = true
   dirLight.shadow.camera.top = 100
@@ -646,10 +828,9 @@ onMounted(() => {
   dirLight.shadow.camera.right = 100
   dirLight.shadow.mapSize.width = 1024
   dirLight.shadow.mapSize.height = 1024
-  dirLight.shadow.bias = -0.0005 
+  dirLight.shadow.bias = -0.0005
   scene.add(dirLight)
 
-  // FIXED: Reusable explosion light (starts off)
   explosionLight = new THREE.PointLight(0xff5500, 0, 30)
   scene.add(explosionLight)
 
@@ -672,29 +853,25 @@ onMounted(() => {
   groundMesh.rotation.x = -Math.PI / 2
   groundMesh.receiveShadow = true
   scene.add(groundMesh)
-  
+
   const grid = new THREE.GridHelper(400, 100, 0x00ffff, 0x003366)
   grid.position.y = 0.01
   grid.material.opacity = 0.2
   grid.material.transparent = true
   // grid removed
 
-  // Glowing Pillars
+  // Pillars (trees)
   for (let i = 0; i < 40; i++) {
     const pillar = new THREE.Group()
     const h = 4 + Math.random() * 6
-    
+
     const base = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.45, h, 8), new THREE.MeshStandardMaterial({ color: 0x5b4630, metalness: 0, roughness: 1 }))
     base.position.y = h / 2; base.castShadow = true; base.receiveShadow = true
     pillar.add(base)
-    
+
     const lightStrip = new THREE.Mesh(new THREE.IcosahedronGeometry(2.4, 1), new THREE.MeshStandardMaterial({ color: 0x2f5a22, roughness: 1, metalness: 0, flatShading: true }))
     lightStrip.position.y = h + 0.8; lightStrip.scale.set(1.3, 0.8, 1.3); lightStrip.castShadow = true
     pillar.add(lightStrip)
-
-    // pillar point lights removed: emissive strip + bloom instead 
-    
-    
 
     let x, z
     do { x = (Math.random() - 0.5) * 300; z = (Math.random() - 0.5) * 300 } while (Math.abs(x) < 15 && Math.abs(z) < 15)
@@ -749,88 +926,67 @@ onMounted(() => {
   }
 
   world = buildWorld(scene, obstacles, barrels)
+  ladders = world.ladders
+  platforms = world.platforms
+
   miniMapCamera = new THREE.OrthographicCamera(-90, 90, 90, -90, 0.1, 1000)
   miniMapCamera.position.set(0, 100, 0); miniMapCamera.up.set(0, 0, -1); miniMapCamera.lookAt(0, 0, 0)
 
-  // ===== PLAYER GUNS =====
-  weapons = {
-    pistol: buildPistol(WEAPON_CONFIG.pistol.color),
-    shotgun: buildShotgun(WEAPON_CONFIG.shotgun.color),
-    sniper: buildSniper(WEAPON_CONFIG.sniper.color)
-  }
-  weapons.pistol.group.scale.set(0.6, 0.6, 0.6)
-  weapons.shotgun.group.scale.set(0.6, 0.6, 0.6)
-  weapons.sniper.group.scale.set(0.5, 0.5, 0.5)
-
-  for (const name of ['pistol', 'shotgun', 'sniper']) {
-    const w = weapons[name]
-    w.group.position.copy(HIP_POS[name])
-    camera.add(w.group)
-    w.group.visible = (name === currentWeapon.value)
-  }
-
-  muzzleFlash = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 0.05), new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false }))
-  muzzleFlash.visible = false
-  scene.add(muzzleFlash)
-
-  muzzleLight = new THREE.PointLight(0xffb060, 0, 5)
-  scene.add(muzzleLight)
-  
+  // ===== PLAYER GUNS (pistol, shotgun, sniper) =====
+  guns = buildGuns(WEAPON_CONFIG)
+  for (const k in guns.models) camera.add(guns.models[k].group)
   scene.add(camera)
+  equipGun('pistol')
 
   new GLTFLoader().load('/models/Soldier.glb', (gltf) => { soldier = gltf }, undefined, (err) => console.error('Model failed', err))
 
   onKeyDown = (e) => {
     keys[e.code] = true
-    if (e.code === 'Space' && isGrounded && gameState.value === 'playing') { verticalVel = 8; isGrounded = false; landingKick = 0.1 }
-    if (e.code === 'KeyR' && gameState.value === 'playing') reloadWeapon()
-    const trySwitch = (name) => {
-      if (currentWeapon.value === name) return
-      weaponAmmo[currentWeapon.value] = currentAmmo.value
-      currentWeapon.value = name
-      currentAmmo.value = weaponAmmo[name]
-      maxAmmo.value = WEAPON_CONFIG[name].maxAmmo
-      isReloading.value = false
-      reloadToken++
-      
-      for (const n of ['pistol', 'shotgun', 'sniper']) {
-        if (weapons[n]) weapons[n].group.visible = (n === name)
-      }
-      equipTime = 0.25
+    if (gameState.value !== 'playing') return
+    if (e.code === 'Space') {
+      if (climbing) leaveLadder(true)
+      else if (isGrounded) { verticalVel = 8; isGrounded = false; landingKick = 0.1 }
     }
-    if (e.code === 'Digit1') trySwitch('pistol')
-    if (e.code === 'Digit2') trySwitch('shotgun')
-    if (e.code === 'Digit3') trySwitch('sniper')
+    if (e.code === 'KeyE' && !e.repeat) {
+      if (climbing) leaveLadder(false)
+      else { const lad = findLadder(); if (lad) attachLadder(lad.L, lad.fromTop) }
+    }
+    if (e.code === 'KeyR') reloadWeapon()
+    if (e.code === 'Digit1') switchWeapon('pistol')
+    if (e.code === 'Digit2') switchWeapon('shotgun')
+    if (e.code === 'Digit3') switchWeapon('sniper')
   }
   onKeyUp = (e) => { keys[e.code] = false }
   onMouseMove = (e) => {
     if (document.pointerLockElement !== renderer.domElement) return
     if (gameState.value !== 'playing') return
-    const sens = 0.002 * (camera.fov / BASE_FOV)
+    // sensitivity follows the zoom, so a 20 degree scope isn't 3x too twitchy
+    const sens = 0.002 * sensMul
     me.ry -= e.movementX * sens
     camera.rotation.x -= e.movementY * sens
     camera.rotation.x = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, camera.rotation.x))
   }
   onMouseDown = (e) => {
-    if (document.pointerLockElement !== renderer.domElement) { if (gameState.value === 'playing') renderer.domElement.requestPointerLock().catch(()=>{}); return }
-    if (e.button === 0 && gameState.value === 'playing') { mouseHeld = true; shoot() }
-    if (e.button === 2 && gameState.value === 'playing') rmbHeld = true
+    if (document.pointerLockElement !== renderer.domElement) { if (gameState.value === 'playing') renderer.domElement.requestPointerLock(); return }
+    if (gameState.value !== 'playing') return
+    if (e.button === 0) { lmbDown = true; shoot() }
+    if (e.button === 2) rmbDown = true
   }
-  onMouseUp = (e) => { 
-    if (e.button === 0) mouseHeld = false
-    if (e.button === 2) rmbHeld = false 
+  onMouseUp = (e) => {
+    if (e.button === 0) lmbDown = false
+    if (e.button === 2) rmbDown = false
   }
   onPointerLockChange = () => {
-    if (!document.pointerLockElement) { rmbHeld = false; adsBlend = 0; adsEase = 0; mouseHeld = false }
+    if (!document.pointerLockElement) { lmbDown = false; rmbDown = false }
     if (!document.pointerLockElement && gameState.value === 'playing') gameState.value = 'paused'
     else if (document.pointerLockElement && gameState.value === 'paused') gameState.value = 'playing'
   }
   onContextMenu = (e) => e.preventDefault()
-  onResize = () => { 
-    camera.aspect = innerWidth / innerHeight; 
-    camera.updateProjectionMatrix(); 
-    renderer.setSize(innerWidth, innerHeight);
-    composer.setSize(innerWidth, innerHeight);
+  onResize = () => {
+    camera.aspect = innerWidth / innerHeight
+    camera.updateProjectionMatrix()
+    renderer.setSize(innerWidth, innerHeight)
+    composer.setSize(innerWidth, innerHeight)
     smaaPass.setSize(innerWidth * renderer.getPixelRatio(), innerHeight * renderer.getPixelRatio())
   }
 
@@ -845,25 +1001,25 @@ onMounted(() => {
     const dt = Math.min((now - lastTime) / 1000, 0.1)
     lastTime = now
 
-    // FIXED: Manage explosion light timer here
     if (explosionTimer > 0) {
       explosionTimer -= dt
       explosionLight.intensity = Math.max(0, explosionTimer / 0.15) * 4
     }
-    
+
     if (gameState.value === 'playing') {
       updatePlayer(dt)
+      if (lmbDown) shoot()           // hold the button to keep firing at the weapon's fire rate
       updateCombat(dt)
       updateAI(dt)
       updateRenderables(dt)
     }
-    
+
     world?.update(dt, now / 1000)
     composer.render()
 
     if (gameState.value === 'playing') {
-      const fog = scene.fog;
-      scene.fog = null;
+      const fog = scene.fog
+      scene.fog = null
       renderer.setViewport(innerWidth - 220, innerHeight - 220, 200, 200)
       renderer.setScissor(innerWidth - 220, innerHeight - 220, 200, 200)
       renderer.setScissorTest(true)
@@ -871,111 +1027,110 @@ onMounted(() => {
       renderer.setViewport(0, 0, innerWidth, innerHeight)
       renderer.setScissor(0, 0, innerWidth, innerHeight)
       renderer.setScissorTest(false)
-      scene.fog = fog;
+      scene.fog = fog
     }
 
     frame = requestAnimationFrame(loop)
   }
 
   function updatePlayer(dt) {
+    const now = performance.now()
+    const cfg = WEAPON_CONFIG[currentWeapon.value]
     rgbShiftPass.uniforms['amount'].value = THREE.MathUtils.lerp(rgbShiftPass.uniforms['amount'].value, 0, dt * 10)
-
     if (overchargeTimer.value > 0) { overchargeTimer.value -= dt; if (overchargeTimer.value < 0) overchargeTimer.value = 0 }
-    
-    fovKick = THREE.MathUtils.lerp(fovKick, 0, dt * 10)
-    bloom = Math.max(0, bloom - dt * 0.15)
-    if (mouseHeld && WEAPON_CONFIG[currentWeapon.value].auto && gameState.value === 'playing') shoot()
 
-    isAiming.value = gameState.value === 'playing' && rmbHeld && !(currentWeapon.value === 'sniper' && isReloading.value)
-    adsBlend = THREE.MathUtils.clamp(adsBlend + Math.sign((isAiming.value ? 1 : 0) - adsBlend) * dt / 0.12, 0, 1)
-    adsEase = adsBlend * adsBlend * (3 - 2 * adsBlend)
-    
-    for (const name of ['pistol', 'shotgun', 'sniper']) {
-      if (weapons[name]) {
-        weapons[name].group.visible = (name === currentWeapon.value) && !(name === 'sniper' && adsEase > 0.85)
-      }
-    }
+    // ---- input state ----
+    const fwd = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0)
+    const strafe = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0)
+    const isMoving = !climbing && (fwd !== 0 || strafe !== 0)
+    const aiming = rmbDown && !isReloading.value && !climbing
+    const sprinting = isMoving && !aiming && (keys.ShiftLeft || keys.ShiftRight)
+    isAiming.value = aiming
 
-    const targetFov = THREE.MathUtils.lerp(BASE_FOV, adsFov(), adsEase)
-    camera.fov = targetFov + fovKick
+    // ---- aim transition (hip <-> sights) ----
+    const adsTarget = aiming ? 1 : 0
+    adsT += (adsTarget - adsT) * Math.min(1, dt * cfg.adsSpeed)
+    if (Math.abs(adsT - adsTarget) < 0.005) adsT = adsTarget
+    const k = smooth(adsT)
+    sprintT += ((sprinting && now - lastShootTime > 350 ? 1 : 0) - sprintT) * Math.min(1, dt * 9)
+    scopeVisible.value = currentWeapon.value === 'sniper' && adsT > 0.9
+
+    // ---- FOV (the shot kick is added on top, never accumulated) ----
+    fovKick = THREE.MathUtils.lerp(fovKick, 0, Math.min(1, dt * 10))
+    fovBase = 70 + (cfg.adsFov - 70) * k + sprintT * 4
+    camera.fov = fovBase + fovKick
     camera.updateProjectionMatrix()
+    sensMul = Math.tan((fovBase * Math.PI) / 360) / Math.tan((35 * Math.PI) / 180)
 
-    landingKick = THREE.MathUtils.lerp(landingKick, 0, dt * 10)
+    // ---- camera roll / shake ----
+    const tilt = (keys.KeyA ? 0.02 : 0) - (keys.KeyD ? 0.02 : 0)
+    camRoll = THREE.MathUtils.lerp(camRoll, tilt, Math.min(1, dt * 6))
+    if (cameraShake > 0) {
+      cameraShake = Math.max(0, cameraShake - dt * 2)
+      camera.rotation.z = camRoll + (Math.random() - 0.5) * cameraShake
+    } else camera.rotation.z = camRoll
 
-    if (cameraShake > 0) { cameraShake -= dt * 2; if (cameraShake < 0) cameraShake = 0; camera.rotation.z = (Math.random() - 0.5) * cameraShake } else camera.rotation.z = 0
-
-    const isMoving = keys.KeyW || keys.KeyA || keys.KeyS || keys.KeyD
-    currentMoveAmount += ((isMoving ? 1 : 0) - currentMoveAmount) * dt * 10
-    moveBobTime += dt * (isMoving ? (keys.ShiftLeft ? 15 : 10) : 2)
-    const bobX = Math.cos(moveBobTime) * 0.01 * currentMoveAmount * (1 - adsEase * 0.85)
-    const bobY = Math.sin(moveBobTime * 2) * 0.008 * currentMoveAmount * (1 - adsEase * 0.85)
-
-    const w = weapons[currentWeapon.value]
-    gunSway.x += (me.ry - (w?.group.userData.lastRy || me.ry)) * 0.05
-    gunSway.y += (camera.rotation.x - (w?.group.userData.lastPitch || camera.rotation.x)) * 0.05
-    gunSway.x *= 0.85; gunSway.y *= 0.85
-    if (w) { w.group.userData.lastRy = me.ry; w.group.userData.lastPitch = camera.rotation.x }
-
-    gunRot.x = THREE.MathUtils.lerp(gunRot.x, 0, dt * 15)
-    gunRot.y = THREE.MathUtils.lerp(gunRot.y, 0, dt * 15)
-    gunCurrentPos.z = THREE.MathUtils.lerp(gunCurrentPos.z, 0, dt * 15)
-
-    const reloadOffset = isReloading.value ? -0.2 : 0
-    
-    if (equipTime > 0) equipTime -= dt
-    const equipOffset = equipTime > 0 ? -Math.sin((equipTime / 0.25) * Math.PI) * 0.3 : 0
-
-    const targetPos = HIP_POS[currentWeapon.value].clone().lerp(ADS_POS[currentWeapon.value], adsEase)
-    targetPos.x += bobX + gunSway.x
-    targetPos.y += bobY + gunSway.y + reloadOffset + equipOffset
-    
-    if (w) {
-      w.group.position.x = THREE.MathUtils.lerp(w.group.position.x, targetPos.x, dt * 20)
-      w.group.position.y = THREE.MathUtils.lerp(w.group.position.y, targetPos.y, dt * 20)
-      w.group.position.z = THREE.MathUtils.lerp(w.group.position.z, targetPos.z + gunCurrentPos.z, dt * 20)
-      
-      w.group.rotation.x = gunSway.y * 2 + gunRot.x + (isReloading.value ? -0.3 : 0)
-      w.group.rotation.y = gunSway.x * 2 + gunRot.y + (isReloading.value ? 0.3 : 0)
-    }
+    // ---- recoil recovery ----
+    const rec = recoilAccum * Math.min(1, dt * 7)
+    recoilAccum -= rec
+    camera.rotation.x = THREE.MathUtils.clamp(camera.rotation.x - rec, -Math.PI / 2 + 0.1, Math.PI / 2 - 0.1)
+    bloom = Math.max(0, bloom - dt * 0.05)
     camera.rotation.y = me.ry
 
-    let nextX = me.x, nextZ = me.z
-    const wantSprint = keys.ShiftLeft || keys.ShiftRight
-    const sprintMul = THREE.MathUtils.lerp(wantSprint ? 1.8 : 1.0, 1.0, adsEase)
-    const speed = THREE.MathUtils.lerp(6, 2.5, adsEase) * sprintMul
-    if (keys.KeyW) { nextX -= Math.sin(me.ry) * speed * dt; nextZ -= Math.cos(me.ry) * speed * dt }
-    if (keys.KeyS) { nextX += Math.sin(me.ry) * speed * dt; nextZ += Math.cos(me.ry) * speed * dt }
-    if (keys.KeyA) { nextX -= Math.cos(me.ry) * speed * dt; nextZ += Math.sin(me.ry) * speed * dt }
-    if (keys.KeyD) { nextX += Math.cos(me.ry) * speed * dt; nextZ -= Math.sin(me.ry) * speed * dt }
+    crossGap.value = Math.round(5 + currentSpread() * innerHeight * 0.7)
+    updateViewModel(dt, now, k, isMoving, sprinting)
 
-    const checkCollision = (nx, nz) => {
-      if (nx < -99.5 || nx > 99.5 || nz < -99.5 || nz > 99.5) return true
-      for (const obs of obstacles) { const b = (obs.userData.boxP ||= new THREE.Box3().setFromObject(obs).expandByScalar(0.5)); if (b.containsPoint(new THREE.Vector3(nx, 1.0, nz))) return true }
-      return false
-    }
-    if (!checkCollision(nextX, me.z)) me.x = nextX
-    if (!checkCollision(me.x, nextZ)) me.z = nextZ
-    
-    groundRaycaster.set(new THREE.Vector3(me.x, 50, me.z), new THREE.Vector3(0, -1, 0))
-    const hits = groundRaycaster.intersectObject(groundMesh, true)
-    let groundY = 0
-    if (hits.length > 0) { groundY = hits[0].point.y }
+    // ---- ladder / platform movement ----
+    const feetY = camera.position.y - 1.6
+    const floorY = floorAt(me.x, me.z, feetY)
 
-    camera.position.y += verticalVel * dt; verticalVel -= 25 * dt
-    if (camera.position.y <= groundY + 1.6) { 
-      if (!isGrounded) landingKick = 0.15
-      camera.position.y = groundY + 1.6; verticalVel = 0; isGrounded = true 
+    if (climbing) {
+      climbPrompt.value = 'W / S  CLIMB    SPACE  JUMP OFF'
+      updateClimb(dt)
+    } else {
+      const lad = findLadder()
+      climbPrompt.value = lad ? (lad.fromTop ? '[E]  CLIMB DOWN' : '[E]  CLIMB LADDER') : ''
+      if (lad && !lad.fromTop && keys.KeyW && Math.cos(me.ry) > 0.35) attachLadder(lad.L, false)
     }
-    camera.position.y -= landingKick
+
+    if (!climbing) {
+      const speed = (aiming ? cfg.adsMove : 6) * (sprinting ? 1.8 : 1)
+      let f = fwd, s = strafe
+      const len = Math.hypot(f, s)
+      if (len > 1) { f /= len; s /= len }     // diagonal movement is no longer faster
+      const nextX = me.x + (-Math.sin(me.ry) * f + Math.cos(me.ry) * s) * speed * dt
+      const nextZ = me.z + (-Math.cos(me.ry) * f - Math.sin(me.ry) * s) * speed * dt
+
+      const plat = floorY > 0 ? platformAt(me.x, me.z, feetY) : null
+      const checkCollision = (nx, nz) => {
+        if (nx < -99.5 || nx > 99.5 || nz < -99.5 || nz > 99.5) return true
+        if (plat) {
+          // on a tower deck: the railing stops you, except at the ladder gap
+          const inside = Math.abs(nx - plat.x) < plat.hw - 0.4 && Math.abs(nz - plat.z) < plat.hd - 0.4
+          const inGap = plat.gap && Math.abs(nx - plat.gap.x) < plat.gap.hw && nz >= plat.z
+          if (!inside && !inGap) return true
+        }
+        _cp.set(nx, floorY + 1.0, nz)
+        for (const obs of obstacles) {
+          const b = (obs.userData.boxP ||= new THREE.Box3().setFromObject(obs).expandByScalar(0.5))
+          if (b.containsPoint(_cp)) return true
+        }
+        return false
+      }
+      if (!checkCollision(nextX, me.z)) me.x = nextX
+      if (!checkCollision(me.x, nextZ)) me.z = nextZ
+
+      const newFloor = floorAt(me.x, me.z, feetY)
+      camera.position.y += verticalVel * dt; verticalVel -= 25 * dt
+      if (camera.position.y <= newFloor + 1.6) {
+        if (!isGrounded) landingKick = 0.15
+        camera.position.y = newFloor + 1.6; verticalVel = 0; isGrounded = true
+      } else isGrounded = false
+      landingKick = THREE.MathUtils.lerp(landingKick, 0, Math.min(1, dt * 10))
+      camera.position.y -= landingKick
+    }
     camera.position.x = me.x; camera.position.z = me.z
-
-    const tiltTarget = (keys.KeyA ? 0.02 : 0) - (keys.KeyD ? 0.02 : 0)
-    if (cameraShake === 0) {
-      camera.rotation.z = THREE.MathUtils.lerp(camera.rotation.z, tiltTarget, dt * 5)
-    }
   }
-
-
 
   function updateCombat(dt) {
     for (let i = playerLasers.length - 1; i >= 0; i--) {
@@ -1059,6 +1214,7 @@ onMounted(() => {
       p.userData.life -= dt
       p.position.add(p.userData.vel.clone().multiplyScalar(dt))
       p.userData.vel.y -= 9.8 * dt
+      if (p.userData.spin) p.rotation.x += p.userData.spin * dt
       if (p.userData.life <= 0) { scene.remove(p); p.geometry.dispose(); p.material.dispose(); particles.splice(i, 1) }
     }
 
@@ -1087,7 +1243,7 @@ onMounted(() => {
             r.mesh.scale.set(1, 1, 1)
             spawnParticles(r.mesh.position, 0xffffff, 5)
           }
-        } 
+        }
         else if (r.state === 'fly' || r.state === 'bounce') {
           r.vy -= 30 * dt
           r.mesh.position.x += r.vx * dt
@@ -1111,7 +1267,7 @@ onMounted(() => {
           if (r.mesh.position.y <= 0.4) {
             r.mesh.position.y = 0.4
             r.bounces++
-            
+
             if (r.bounces >= 2) {
               r.state = 'settle'
               r.stateTimer = 0.4
@@ -1128,7 +1284,7 @@ onMounted(() => {
               r.rz = (Math.random() - 0.5) * 25
             }
           }
-        } 
+        }
         else if (r.state === 'settle') {
           r.mesh.scale.lerp(new THREE.Vector3(1, 1, 1), dt * 15)
           r.stateTimer -= dt
@@ -1144,7 +1300,7 @@ onMounted(() => {
               }
             }
           }
-        } 
+        }
         else if (r.state === 'twitch') {
           r.mesh.scale.lerp(new THREE.Vector3(1, 1, 1), dt * 15)
           if (r.mesh.userData.bones) {
@@ -1197,8 +1353,8 @@ onMounted(() => {
     if (alive === 0 && enemies.length > 0) {
       for (const en of enemies) { const m = scene.getObjectByName(en.id); if (m) scene.remove(m) }
       enemies = []
+      climbing = null
       gameState.value = 'shop'
-      adsBlend = 0; adsEase = 0; rmbHeld = false
       if (document.pointerLockElement) document.exitPointerLock()
       return
     }
@@ -1274,7 +1430,8 @@ onMounted(() => {
     playSound('explosion')
     spawnParticles(new THREE.Vector3(e.x, 1, e.z), 0xff5522, 25)
     cameraShake = Math.max(cameraShake, 0.35)
-    if (Math.hypot(me.x - e.x, me.z - e.z) < 7) damagePlayer(35, e.x, e.z)
+    // standing on a tower puts you out of reach of the blast
+    if (Math.hypot(me.x - e.x, me.z - e.z) < 7 && camera.position.y < 4) damagePlayer(35, e.x, e.z)
     e.dead = true
     const m = scene.getObjectByName(e.id)
     if (m) scene.remove(m)
@@ -1309,13 +1466,14 @@ onMounted(() => {
     e.dist = dist
     if (e.hitT > 0) { e.hitT -= dt; if (!e.heavy) return }
     e.dashCd -= dt; e.dashT -= dt; e.losT -= dt
-    if (e.losT <= 0) { e.los = dist < 3 || hasLineOfSight(e.x, e.z, me.x, me.z); e.losT = 0.15 + Math.random() * 0.1 }
+    if (e.losT <= 0) { e.los = dist < 3 || hasLineOfSight(e.x, e.z, me.x, me.z, camera.position.y); e.losT = 0.15 + Math.random() * 0.1 }
     const los = e.los
+    const elevated = camera.position.y > 4        // player is up on a tower: melee can't reach
     const ang = Math.atan2(dx, dz)
     e.ry = ang
     if (Math.random() < dt * 0.5) e.strafeDir *= -1
     const side = (Math.PI / 2) * e.strafeDir
-    const melee = (dmg, cd) => { e.attackT -= dt; if (e.attackT <= 0) { damagePlayer(dmg, e.x, e.z); e.attackT = cd } }
+    const melee = (dmg, cd) => { e.attackT -= dt; if (e.attackT <= 0) { if (!elevated) damagePlayer(dmg, e.x, e.z); e.attackT = cd } }
 
     switch (e.type) {
       case 'normal': {
@@ -1439,14 +1597,14 @@ onMounted(() => {
       let m = scene.getObjectByName(e.id)
       if (!m) { m = createEnemyMesh(e); scene.add(m) }
 
-      let diff = e.ry - m.rotation.y;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      m.rotation.y += diff * dt * 10;
+      let diff = e.ry - m.rotation.y
+      while (diff < -Math.PI) diff += Math.PI * 2
+      while (diff > Math.PI) diff -= Math.PI * 2
+      m.rotation.y += diff * dt * 10
 
       const targetTilt = e.hitT > 0 ? -0.5 : 0
       m.rotation.x = THREE.MathUtils.lerp(m.rotation.x, targetTilt, dt * 15)
-      
+
       m.position.x += (e.x - m.position.x) * 15 * dt
       m.position.z += (e.z - m.position.z) * 15 * dt
 
@@ -1454,7 +1612,7 @@ onMounted(() => {
       const hits = groundRaycaster.intersectObject(groundMesh, true)
       let groundY = 0
       if (hits.length > 0) { groundY = hits[0].point.y }
-      
+
       m.position.y = THREE.MathUtils.lerp(m.position.y, groundY, dt * 10)
 
       const isMoving = Math.abs(e.x - m.position.x) > 0.1 || Math.abs(e.z - m.position.z) > 0.1
