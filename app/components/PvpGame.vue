@@ -19,7 +19,7 @@
       <div v-if="comboCount > 1" style="font-size:22px;color:#ffd700;margin-top:4px;text-shadow:0 0 10px #ffd700;">🔥 COMBO x{{ comboCount }}</div>
     </div>
 
-    <div v-if="gameState === 'playing'" style="position:fixed;top:20px;left:20px;color:#fff;font:bold 24px 'Courier New', monospace;text-shadow:0 0 10px #00ffff;z-index:5;">
+    <div v-if="gameState === 'playing' && !netMode.multi" style="position:fixed;top:20px;left:20px;color:#fff;font:bold 24px 'Courier New', monospace;text-shadow:0 0 10px #00ffff;z-index:5;">
       <div>WAVE: <span style="color:#00ffff">{{ wave }}</span> <span v-if="wave % 5 === 0" style="color:red;font-size:18px;text-shadow:0 0 10px red;">[BOSS]</span></div>
       <div>SCORE: <span style="color:#ffd700">{{ score }}</span></div>
       <div>SCRAP: <span style="color:#00ffaa">{{ scrap }}</span></div>
@@ -94,6 +94,24 @@
       <button @click="startNextWave" style="margin-top:50px;padding:15px 40px;font-size:24px;font-weight:bold;background:#00ffff;color:#000;border:none;border-radius:2px;cursor:pointer;box-shadow:0 0 20px #00ffff;">START WAVE {{ wave + 1 }}</button>
     </div>
 
+    <!-- MULTIPLAYER (names are rendered with {{ }} only, never innerHTML) -->
+    <div v-if="netMode.multi" style="position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:120;display:flex;gap:12px;align-items:center;font:12px 'Courier New', monospace;color:#00ffff;background:rgba(0,0,0,0.65);border:1px solid #00ffff;padding:4px 10px;box-shadow:0 0 10px rgba(0,255,255,0.3);">
+      <span>ROOM {{ netMode.room.toUpperCase() }}</span>
+      <span :style="{ color: netStatus === 'playing' ? '#00ffaa' : '#ff0055' }">{{ netStatus.toUpperCase() }}</span>
+      <span v-if="netStatus === 'playing'">{{ netPing }} ms · {{ netRoster.length }}/{{ ROOM_CAPACITY }}</span>
+      <button @click="copyRoomLink" style="font:bold 12px 'Courier New', monospace;color:#000;background:#00ffff;border:none;padding:3px 8px;cursor:pointer;">{{ linkCopied ? 'COPIED' : 'COPY LINK' }}</button>
+    </div>
+    <div v-if="netMode.multi && netNote" style="position:fixed;top:44px;left:50%;transform:translateX(-50%);z-index:120;font:bold 14px 'Courier New', monospace;color:#ff0055;background:rgba(0,0,0,0.75);border:1px solid #ff0055;padding:6px 14px;max-width:80vw;word-break:break-all;">{{ netNote }}</div>
+    <div v-if="netMode.multi && showScoreboard" style="position:fixed;top:18%;left:50%;transform:translateX(-50%);z-index:30;min-width:320px;background:rgba(0,0,0,0.8);border:2px solid #00ffff;box-shadow:0 0 20px rgba(0,255,255,0.35);padding:14px 22px;font:16px 'Courier New', monospace;color:#fff;">
+      <div style="color:#00ffff;font-weight:bold;letter-spacing:3px;margin-bottom:8px;">PLAYERS · {{ netRoster.length }}/{{ ROOM_CAPACITY }}</div>
+      <div v-for="p in netRoster" :key="p.id" :style="{ color: p.self ? '#00ffff' : '#fff', padding: '2px 0' }">{{ p.name }}<span v-if="p.self" style="color:#ff0055;"> (YOU)</span></div>
+    </div>
+    <div v-if="netMode.multi && gameState === 'playing' && lockLost" style="position:fixed;top:60%;left:50%;transform:translateX(-50%);z-index:90;pointer-events:none;font:bold 28px 'Courier New', monospace;color:#00ffff;text-shadow:0 0 15px #00ffff,0 2px 4px #000;">CLICK TO RESUME</div>
+    <div v-if="netMode.multi && netStatus === 'full'" style="position:fixed;inset:0;background:rgba(0,0,0,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:130;color:#fff;font-family:'Courier New', monospace;">
+      <h1 style="font-size:48px;margin:0;color:#ff0055;text-shadow:0 0 20px #ff0055;">ROOM FULL</h1>
+      <p style="margin-top:16px;color:#aaa;">This room has {{ ROOM_CAPACITY }} players. Ask for another room code (?room=...).</p>
+    </div>
+
     <!-- NAME SCREEN (names are rendered with {{ }} only, never innerHTML) -->
     <div v-if="gameState === 'name'" style="position:fixed;inset:0;background:rgba(0,0,0,0.95);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:110;color:#fff;font-family:'Courier New', monospace;">
       <h1 style="font-size:56px;margin:0;color:#00ffff;text-shadow:0 0 30px #00ffff;letter-spacing:8px;">NEXUS STRIKE</h1>
@@ -145,6 +163,10 @@ import { generateLayout, layoutHash, parseSeed } from '~~/shared/layout.js'
 import { rayVsList, segmentClear, pointInAABB } from '~~/shared/collide.js'
 import { validateName } from '~~/shared/names.js'
 import { createProfileStore, safeStorage } from '../pvp/profile.js'
+import { NetClient } from '../pvp/net/NetClient.js'
+import { WebSocketTransport, resolveWsUrl } from '../pvp/net/WebSocketTransport.js'
+import { RemotePlayers } from '../pvp/net/RemotePlayers.js'
+import { parseNetMode, wsBaseFor, ROOM_CAPACITY } from '../pvp/net/netMode.js'
 import { buildGuns } from '../game/guns.js'
 import { enemyExtras, buildEnemyMesh, updateEnemyVisuals, hideEnemyExtras } from '../game/enemies.js'
 
@@ -152,7 +174,10 @@ const WEAPON_LIST = ['pistol', 'shotgun', 'sniper']
 
 const root = ref(null)
 const route = useRoute()
-const seed = parseSeed(route.query.seed, 1)
+const runtimeConfig = useRuntimeConfig()
+// multiplayer is the default: the seed comes from the room code. ?seed= alone or ?solo=1 stays solo.
+const netMode = parseNetMode(route.query)
+const seed = netMode.multi ? netMode.seed : parseSeed(route.query.seed, 1)
 const layoutHashStr = ref('')
 const nameInput = ref('')
 const nameError = ref('')
@@ -185,6 +210,16 @@ const showHitDir = ref(false)
 const climbPrompt = ref('')
 const crossGap = ref(12)
 const scopeVisible = ref(false)
+// ---- multiplayer UI state (inert in solo) ----
+const netStatus = ref('idle')
+const netPing = ref(0)
+const netRoster = ref([])
+const netNote = ref('')
+const roomLink = ref('')
+const linkCopied = ref(false)
+const showScoreboard = ref(false)
+const lockLost = ref(false)
+let net = null, remotes = null, offNet = [], statTimer = null, spawnedOnce = false, prevRoster = null
 // profile (name, best score, lifetime stats) lives in localStorage; see app/pvp/profile.js
 const store = createProfileStore(safeStorage(() => window.localStorage))
 const highScore = ref(store.get().bestScore)
@@ -198,8 +233,89 @@ function submitName() {
   store.setName(r.name)
   playerName.value = store.get().name
   gameState.value = 'menu'
+  startNet()
 }
-function changeName() { nameInput.value = playerName.value; nameError.value = ''; gameState.value = 'name' }
+function changeName() { stopNet(); nameInput.value = playerName.value; nameError.value = ''; gameState.value = 'name' }
+
+// ===== multiplayer (step 3b) =====
+function goToRoom(code) {
+  const q = new URLSearchParams(window.location.search)
+  q.delete('seed'); q.set('room', code)
+  window.location.replace(`${window.location.pathname}?${q.toString()}`) // new room = new seed = new world: reload
+}
+
+function placeAtSpawn() {
+  const pts = layout && layout.playerSpawns
+  if (!net || net.status !== 'playing' || !pts || !pts.length) return false
+  const s = pts[net.slot % pts.length]
+  me.x = s.x; me.z = s.z; me.ry = s.ry
+  camera.position.x = s.x; camera.position.z = s.z; camera.position.y = 1.6
+  verticalVel = 0; isGrounded = true; climbing = null
+  spawnedOnce = true
+  return true
+}
+
+function syncNetUi() {
+  if (!net) return
+  netPing.value = Math.round(net.rtt)
+  const list = net.scoreboard()
+  list.sort((a, b) => (Number(b.self) - Number(a.self)) || a.name.localeCompare(b.name))
+  netRoster.value = list
+}
+
+function startNet() {
+  if (!netMode.multi || net || !playerName.value) return
+  const base = wsBaseFor({ configured: runtimeConfig.public.wsUrl, dev: import.meta.dev, location: window.location })
+  roomLink.value = `${window.location.origin}${window.location.pathname}?room=${netMode.room}`
+  net = new NetClient({
+    room: netMode.room,
+    name: playerName.value,
+    transportFactory: (room) => new WebSocketTransport({ url: resolveWsUrl(room, { base, hostname: window.location.hostname }) }),
+    getInput: () => {
+      if (!camera || gameState.value !== 'playing') return null // at the menu you are not in the world yet
+      return { p: [me.x, camera.position.y - 1.6, me.z], y: me.ry, a: camera.rotation.x, w: Math.max(0, WEAPON_LIST.indexOf(currentWeapon.value)) }
+    },
+  })
+  remotes = new RemotePlayers(scene)
+  prevRoster = null
+  offNet = [
+    net.on('status', (s) => { netStatus.value = s; if (s === 'playing') netNote.value = '' }),
+    net.on('welcome', () => { if (!spawnedOnce && gameState.value === 'playing') placeAtSpawn() }),
+    net.on('roster', (m) => {
+      const cur = new Map([...m.values()].map((p) => [p.id, p.name]))
+      if (prevRoster) {
+        for (const [id, name] of cur) if (!prevRoster.has(id) && id !== net.selfId) addKillFeed(`${name} joined`)
+        for (const [id, name] of prevRoster) if (!cur.has(id)) addKillFeed(`${name} left`)
+      }
+      prevRoster = cur
+      syncNetUi()
+    }),
+    net.on('seedmismatch', (d) => { netNote.value = `SEED MISMATCH (${d.expected} vs ${d.got}): maps differ, reload` }),
+    net.on('shard', (d) => goToRoom(d.to)),
+    net.on('full', () => { netNote.value = 'ROOM FULL' }),
+    net.on('lost', () => { netNote.value = 'CONNECTION LOST: reload the page' }),
+    net.on('server-error', (d) => { if (d.code === 'version') netNote.value = 'VERSION MISMATCH: reload the page' }),
+  ]
+  statTimer = setInterval(syncNetUi, 250)
+  net.connect()
+}
+
+function stopNet() {
+  for (const off of offNet) off()
+  offNet = []
+  if (statTimer !== null) { clearInterval(statTimer); statTimer = null }
+  if (net) { net.close(); net = null }
+  if (remotes) { remotes.dispose(); remotes = null }
+  netStatus.value = 'idle'; netRoster.value = []; netNote.value = ''; spawnedOnce = false; prevRoster = null
+}
+
+async function copyRoomLink() {
+  try {
+    await navigator.clipboard.writeText(roomLink.value)
+    linkCopied.value = true
+    setTimeout(() => { linkCopied.value = false }, 1500)
+  } catch { netNote.value = roomLink.value } // clipboard blocked: show the link instead
+}
 
 const crossTicks = computed(() => {
   const g = crossGap.value, L = 9
@@ -710,7 +826,7 @@ function startGame() {
     for (const l of lootItems) { scene.remove(l.mesh); l.mesh.geometry.dispose(); l.mesh.material.dispose() }
     for (const l of playerLasers) { scene.remove(l.mesh); l.geo.dispose(); l.mat.dispose() }
     enemies = []; lootItems.length = 0; playerLasers.length = 0
-    spawnWave()
+    if (netMode.multi) { spawnedOnce = false; placeAtSpawn() } else spawnWave() // multiplayer: no PvE waves until step 6
     gameState.value = 'playing'
     renderer.domElement.requestPointerLock()
   }
@@ -913,6 +1029,7 @@ onMounted(() => {
 
   onKeyDown = (e) => {
     keys[e.code] = true
+    if (e.code === 'Tab' && netMode.multi && gameState.value === 'playing') { e.preventDefault(); showScoreboard.value = true }
     if (gameState.value !== 'playing') return
     if (e.code === 'Space') {
       if (climbing) leaveLadder(true)
@@ -927,7 +1044,10 @@ onMounted(() => {
     if (e.code === 'Digit2') switchWeapon('shotgun')
     if (e.code === 'Digit3') switchWeapon('sniper')
   }
-  onKeyUp = (e) => { keys[e.code] = false }
+  onKeyUp = (e) => {
+    keys[e.code] = false
+    if (e.code === 'Tab') showScoreboard.value = false
+  }
   onMouseMove = (e) => {
     if (document.pointerLockElement !== renderer.domElement) return
     if (gameState.value !== 'playing') return
@@ -949,6 +1069,7 @@ onMounted(() => {
   }
   onPointerLockChange = () => {
     if (!document.pointerLockElement) { lmbDown = false; rmbDown = false }
+    if (netMode.multi) { lockLost.value = !document.pointerLockElement && gameState.value === 'playing'; return }
     if (!document.pointerLockElement && gameState.value === 'playing') gameState.value = 'paused'
     else if (document.pointerLockElement && gameState.value === 'paused') gameState.value = 'playing'
   }
@@ -1048,6 +1169,8 @@ onMounted(() => {
     camera.rotation.x = THREE.MathUtils.clamp(camera.rotation.x - rec, -Math.PI / 2 + 0.1, Math.PI / 2 - 0.1)
     bloom = Math.max(0, bloom - dt * 0.05)
     camera.rotation.y = me.ry
+
+    if (net && remotes) remotes.update(net.sample())
 
     crossGap.value = Math.round(5 + currentSpread() * innerHeight * 0.7)
     updateViewModel(dt, now, k, isMoving, sprinting)
@@ -1606,9 +1729,11 @@ onMounted(() => {
   }
 
   loop()
+  startNet()
 })
 
 onBeforeUnmount(() => {
+  stopNet()
   cancelAnimationFrame(frame)
   removeEventListener('resize', onResize)
   removeEventListener('keydown', onKeyDown)
