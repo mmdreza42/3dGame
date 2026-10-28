@@ -5,6 +5,7 @@ import {
 } from '../../shared/protocol.js'
 
 const input = (o = {}) => encode({ t: 'i', s: 1, p: [1, 2, 3], y: 0.5, a: 0.1, w: 1, ...o })
+const commandInput = (o = {}) => encode({ t: 'i', s: 1, f: 1, d: 0, r: false, j: false, c: 0, e: false, y: 0.5, a: 0.1, w: 1, ...o })
 const hello = (o = {}) => encode({ t: 'h', v: PROTOCOL_VERSION, n: 'Neo', ...o })
 
 describe('constants', () => {
@@ -22,7 +23,23 @@ describe('client message validation', () => {
     expect(decodeClient(hello()).ok).toBe(true)
     expect(decodeClient(hello({ k: 'a'.repeat(36) })).ok).toBe(true)
     expect(decodeClient(input()).ok).toBe(true)
+    expect(decodeClient(commandInput()).ok).toBe(true)
     expect(decodeClient(encode({ t: 'p', c: 12.5 })).ok).toBe(true)
+  })
+
+  it('rejects invalid movement command fields', () => {
+    const badCommands = [
+      commandInput({ f: 2 }),
+      commandInput({ d: -2 }),
+      commandInput({ r: 1 }),
+      commandInput({ j: 0 }),
+      commandInput({ c: 2 }),
+      commandInput({ e: 1 }),
+      commandInput({ e: undefined }),
+      commandInput({ extra: true }),
+      commandInput({ p: [1, 2, 3] }),
+    ]
+    for (const raw of badCommands) expect(decodeClient(raw).ok, raw).toBe(false)
   })
 
   it('rejects garbage', () => {
@@ -58,6 +75,7 @@ describe('server message validation', () => {
   it('accepts valid server messages', () => {
     expect(decodeServer(encode(welcome)).ok).toBe(true)
     expect(decodeServer(encode({ t: 's', n: 1, ts: 2, p: [[1, 0, 0, 0, 0, 0, 0, 3]] })).ok).toBe(true)
+    expect(decodeServer(encode({ t: 's', n: 1, ts: 2, p: [[1, 0, 0, 0, 0, 0, 0, 3, 3.5, 0, 1]] })).ok).toBe(true)
     expect(decodeServer(encode({ t: 'j', id: 2, n: 'B', si: 1 })).ok).toBe(true)
     expect(decodeServer(encode({ t: 'l', id: 2 })).ok).toBe(true)
     expect(decodeServer(encode({ t: 'f', r: 'public-1', x: 'public-2' })).ok).toBe(true)
@@ -65,6 +83,19 @@ describe('server message validation', () => {
     expect(decodeServer(encode({ t: 'e', c: 'bad' })).ok).toBe(true)
     expect(decodeServer(encode({ t: 'o', c: 1, ts: 2 })).ok).toBe(true)
   })
+  it('validates optional command-mode movement state in snapshots', () => {
+    const valid = { t: 's', n: 1, ts: 2, p: [[1, 0, 0, 0, 0, 0, 0, 3, 3.5, 0, 1]] }
+    expect(decodeServer(encode(valid)).ok).toBe(true)
+
+    for (const row of [
+      [1, 0, 0, 0, 0, 0, 0, 3, 3.5, 2, 1],
+      [1, 0, 0, 0, 0, 0, 0, 3, 3.5, 0, -2],
+      [1, 0, 0, 0, 0, 0, 0, 3, 3.5, 0, 16],
+    ]) {
+      expect(decodeServer(encode({ ...valid, p: [row] })).ok).toBe(false)
+    }
+  })
+
   it('rejects malformed server messages', () => {
     for (const m of [
       { ...welcome, pl: 'x' }, { ...welcome, si: 99 }, { ...welcome, extra: 1 }, { ...welcome, r: 'BAD ROOM' },

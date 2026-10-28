@@ -5,14 +5,14 @@
 export const NAME_MIN = 3
 export const NAME_MAX = 16
 
-const ALLOWED = /^[\p{L}\p{N} _.\-]+$/u
+const ALLOWED = /^[\p{L}\p{N} _.-]+$/u
 
 // Lenient: strips bad characters, collapses spaces, trims, truncates. Used by the server.
 export function cleanName(raw) {
   if (typeof raw !== 'string') return ''
   return raw
     .normalize('NFC')
-    .replace(/[^\p{L}\p{N} _.\-]/gu, '')
+    .replace(/[^\p{L}\p{N} _.-]/gu, '')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, NAME_MAX)

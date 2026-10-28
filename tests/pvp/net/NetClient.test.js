@@ -170,6 +170,150 @@ describe('NetClient session', () => {
     expect(l2.status).toBe('full'); expect(full).toEqual({ room: 'abcd' })
   })
 
+  it('sends valid command-mode input without client positions', () => {
+    const w = mkWorld()
+    const a = new NetClient({
+      room: 'abcd',
+      name: 'Cmd',
+      transportFactory: w.factory,
+      clock: w.clock,
+      storage: mem(),
+      getInput: () => ({
+        mode: 'commands',
+        f: 1, d: -1, r: true, j: false, c: 1, e: true,
+        y: 0.5, a: 0.1, w: 2,
+      }),
+    })
+    a.connect()
+    w.advance(50)
+
+    const inputs = w.transports[0].sent.filter((m) => m.t === 'i')
+    expect(inputs).toHaveLength(1)
+    expect(inputs[0]).toEqual({
+      t: 'i', s: 1, f: 1, d: -1, r: true, j: false, c: 1, e: true,
+      y: 0.5, a: 0.1, w: 2,
+    })
+    expect(decodeClient(JSON.stringify(inputs[0])).ok).toBe(true)
+    expect(Object.hasOwn(inputs[0], 'p')).toBe(false)
+  })
+
+  it('acknowledges command inputs and emits authoritative self snapshots', () => {
+    const w = mkWorld()
+    const a = new NetClient({
+      room: 'abcd',
+      name: 'Cmd',
+      transportFactory: w.factory,
+      clock: w.clock,
+      storage: mem(),
+      getInput: () => ({
+        mode: 'commands',
+        f: 1, d: 0, r: false, j: false, c: 0, e: false,
+        y: 0.25, a: 0, w: 0,
+      }),
+    })
+    const selfUpdates = []
+    a.on('self-snapshot', (snapshot) => selfUpdates.push(snapshot))
+    a.connect()
+    a._sendInput()
+
+    expect(a.pendingInputs.map((input) => input.s)).toEqual([1])
+
+    a._onMessage({
+      t: 's', n: 7, ts: w.t,
+      p: [[a.selfId, 4, 1, 5, 0.25, 0, 0, 1]],
+    })
+
+    expect(a.ackSeq).toBe(1)
+    expect(a.pendingInputs).toEqual([])
+    expect(selfUpdates).toHaveLength(1)
+    expect(selfUpdates[0]).toMatchObject({
+      id: a.selfId,
+      x: 4, y: 1, z: 5,
+      yaw: 0.25, pitch: 0, w: 0,
+      ackSeq: 1, tick: 7,
+      pendingInputs: [],
+    })
+  })
+
+  it('passes authoritative vertical state through extended self snapshots', () => {
+    const w = mkWorld()
+    const a = new NetClient({
+      room: 'abcd',
+      name: 'Cmd',
+      transportFactory: w.factory,
+      clock: w.clock,
+      storage: mem(),
+      getInput: () => ({
+        mode: 'commands',
+        f: 1, d: 0, r: false, j: false, c: 0, e: false,
+        y: 0, a: 0, w: 0,
+      }),
+    })
+    const updates = []
+    a.on('self-snapshot', (snapshot) => updates.push(snapshot))
+    a.connect()
+    a._sendInput()
+
+    a._onMessage({
+      t: 's', n: 9, ts: w.t,
+      p: [[a.selfId, 4, 7, 5, 0.25, 0, 0, 1, 3.5, 0, 1]],
+    })
+
+    expect(updates).toHaveLength(1)
+    expect(updates[0]).toMatchObject({
+      x: 4, y: 7, z: 5, yaw: 0.25,
+      verticalVel: 3.5, grounded: false, climbIndex: 1, ackSeq: 1,
+    })
+    expect(a.pendingInputs).toEqual([])
+  })
+
+  it('retains only unacknowledged commands after a partial acknowledgement', () => {
+    const w = mkWorld()
+    const a = new NetClient({
+      room: 'abcd',
+      name: 'Cmd',
+      transportFactory: w.factory,
+      clock: w.clock,
+      storage: mem(),
+      getInput: () => ({
+        mode: 'commands',
+        f: 1, d: 0, r: false, j: false, c: 0, e: false,
+        y: 0, a: 0, w: 0,
+      }),
+    })
+    a.connect()
+    a._sendInput()
+    a._sendInput()
+    a._sendInput()
+
+    a._onMessage({
+      t: 's', n: 8, ts: w.t,
+      p: [[a.selfId, 1, 0, 1, 0, 0, 0, 2]],
+    })
+
+    expect(a.ackSeq).toBe(2)
+    expect(a.pendingInputs.map((input) => input.s)).toEqual([3])
+  })
+
+  it('does not send malformed command-mode input', () => {
+    const w = mkWorld()
+    const a = new NetClient({
+      room: 'abcd',
+      name: 'Cmd',
+      transportFactory: w.factory,
+      clock: w.clock,
+      storage: mem(),
+      getInput: () => ({
+        mode: 'commands',
+        f: 2, d: 0, r: false, j: false, c: 0, e: false,
+        y: 0, a: 0, w: 0,
+      }),
+    })
+    a.connect()
+    w.advance(200)
+    expect(w.transports[0].sent.filter((m) => m.t === 'i')).toHaveLength(0)
+  })
+
   it('does not send NaN input', () => {
     const w = mkWorld()
     const a = mkClient(w, 'Ann'); a.connect()

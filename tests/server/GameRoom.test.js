@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { GameRoom } from '../../server/GameRoom.js'
 import { PROTOCOL_VERSION, LIMITS, encode, decodeServer } from '../../shared/protocol.js'
+import { pickSpawn, teamOf } from '../../shared/combat.js'
+import { generateLayout } from '../../shared/layout.js'
 
 // simple sanitizer standing in for shared/names.js (the real one is covered by names-adapter.test.js)
 const sanitizeName = (raw, taken) => {
@@ -200,6 +202,199 @@ describe('input and snapshots', () => {
     expect(a.of('s').pop().p[0].slice(1, 4)).toEqual([10, 1, 2])
   })
 
+  it('spawns command clients using the deterministic server layout', () => {
+    const { room } = mkRoom()
+    const a = join(room, 'A')
+    room.onMessage(a, encode({
+      t: 'i', s: 1, f: 1, d: -1, r: true, j: false, c: 1, e: true,
+      y: 0.5, a: 0.1, w: 2,
+    }))
+
+    const p = room.players.get(1)
+    const layout = generateLayout(room.seed)
+    const expected = pickSpawn(layout.playerSpawns, teamOf(p.slot), p.slot)
+    expect(p.pos).toEqual([expected.x, 0, expected.z])
+    expect(p.movementMode).toBe('commands')
+    expect(p.pendingSpawnSlot).toBe(null)
+    expect(p.moveInput).toEqual({
+      forward: 0, strafe: 0, sprint: false, jump: false, climb: 0, interact: false,
+    })
+    expect(p.inputQueue).toEqual([{
+      seq: 1, forward: 1, strafe: -1, sprint: true, jump: false, climb: 1,
+      interact: true, yaw: 0.5, pitch: 0.1, weapon: 2,
+    }])
+    expect(p.lastAppliedSeq).toBe(0)
+    // Aim and weapon state in this packet apply when the server consumes it.
+    expect(p.yaw).toBe(expected.ry)
+    expect(p.pitch).toBe(0)
+    expect(p.weapon).toBe(0)
+    expect(p.inputQueue[0]).toMatchObject({ yaw: 0.5, pitch: 0.1, weapon: 2 })
+  })
+
+  it('uses the advertised respawn slot when a command client returns', () => {
+    const { room, clock } = mkRoom()
+    const a = join(room, 'A')
+    const p = room.players.get(1)
+    p.deaths = 2
+    p.alive = false
+    p.respawnAt = clock.t + 1
+
+    clock.t += 2
+    room.onTick(clock.t)
+
+    const respawn = a.of('r').at(-1)
+    const expected = pickSpawn(
+      generateLayout(room.seed).playerSpawns,
+      teamOf(p.slot),
+      respawn.si,
+    )
+    expect(p.pendingSpawnSlot).toBe(respawn.si)
+
+    room.onMessage(a, encode({
+      t: 'i', s: 1, f: 0, d: 0, r: false, j: false, c: 0, e: false,
+      y: 0, a: 0, w: 0,
+    }))
+    expect(p.pos).toEqual([expected.x, 0, expected.z])
+    expect(p.pendingSpawnSlot).toBe(null)
+  })
+
+  it('processes queued inputs in order and acknowledges only applied commands', () => {
+    const { room, clock } = mkRoom()
+    const a = join(room, 'A')
+    const sendCommand = (s, f, d) => room.onMessage(a, encode({
+      t: 'i', s, f, d, r: false, j: false, c: 0, e: false,
+      y: 0, a: 0, w: 0,
+    }))
+    sendCommand(1, 1, 0)
+    sendCommand(2, 0, 1)
+
+    const p = room.players.get(1)
+    room._layout = { ...generateLayout(room.seed), obstacles: [], platforms: [], ladders: [] }
+    p.pos = [0, 0, 0]
+    p.yaw = 0
+    p.grounded = true
+    p.verticalVel = 0
+
+    expect(p.inputQueue.map((item) => item.seq)).toEqual([1, 2])
+    expect(p.lastAppliedSeq).toBe(0)
+
+    room.onTick(clock.t)
+    expect(p.lastAppliedSeq).toBe(0)
+    clock.t += 1000 / 30
+    room.onTick(clock.t)
+    expect(p.lastAppliedSeq).toBe(1)
+    expect(p.pos[2]).toBeCloseTo(-0.2)
+
+    room._snapshot(clock.t)
+    expect(a.of('s').at(-1).p[0][7]).toBe(1)
+
+    clock.t += 1000 / 30
+    room.onTick(clock.t)
+    expect(p.lastAppliedSeq).toBe(2)
+    expect(p.pos[0]).toBeCloseTo(0.2)
+  })
+
+  it('drops oldest commands when the bounded input queue fills', () => {
+    const { room } = mkRoom()
+    const a = join(room, 'A')
+    for (let s = 1; s <= 15; s++) {
+      room.onMessage(a, encode({
+        t: 'i', s, f: 0, d: 0, r: false, j: false, c: 0, e: false,
+        y: 0, a: 0, w: 0,
+      }))
+    }
+    const p = room.players.get(1)
+    expect(p.inputQueue).toHaveLength(12)
+    expect(p.inputQueue[0].seq).toBe(4)
+    expect(p.inputQueue.at(-1).seq).toBe(15)
+    expect(p.lastAppliedSeq).toBe(3)
+  })
+
+  it('moves command-controlled players on fixed server ticks', () => {
+    const { room, clock } = mkRoom()
+    const a = join(room, 'A')
+    room.onMessage(a, encode({
+      t: 'i', s: 1, f: 1, d: 0, r: false, j: false, c: 0, e: false,
+      y: 0, a: 0, w: 0,
+    }))
+
+    const p = room.players.get(1)
+    expect(p.movementMode).toBe('commands')
+    // Isolate deterministic movement from map collision for this fixed-step test.
+    const generated = generateLayout(room.seed)
+    room._layout = { ...generated, obstacles: [], platforms: [], ladders: [] }
+    p.pos = [0, 0, 0]
+    p.yaw = 0
+    p.grounded = true
+    p.verticalVel = 0
+
+    room.onTick(clock.t)
+    expect(p.pos).toEqual([0, 0, 0])
+    clock.t += 1000 / 30
+    room.onTick(clock.t)
+    expect(p.pos[0]).toBeCloseTo(0)
+    expect(p.pos[1]).toBeCloseTo(0)
+    expect(p.pos[2]).toBeCloseTo(-0.2)
+  })
+
+  it('does not restart a jump while jump remains held', () => {
+    const { room, clock } = mkRoom()
+    const a = join(room, 'A')
+    room.onMessage(a, encode({
+      t: 'i', s: 1, f: 0, d: 0, r: false, j: true, c: 0, e: false,
+      y: 0, a: 0, w: 0,
+    }))
+
+    const p = room.players.get(1)
+    room._layout = { ...generateLayout(room.seed), obstacles: [], platforms: [], ladders: [] }
+    p.pos = [0, 0, 0]
+    p.grounded = true
+    p.verticalVel = 0
+
+    room.onTick(clock.t)
+    clock.t += 1000 / 30
+    room.onTick(clock.t)
+    const firstVelocity = p.verticalVel
+    expect(p.pos[1]).toBeGreaterThan(0)
+    expect(firstVelocity).toBeGreaterThan(0)
+
+    clock.t += 1000 / 30
+    room.onTick(clock.t)
+    expect(p.verticalVel).toBeLessThan(firstVelocity)
+    expect(p.verticalVel).toBeGreaterThan(0)
+  })
+
+  it('includes vertical state in command-mode snapshots only', () => {
+    const { room, clock } = mkRoom()
+    const a = join(room, 'A')
+    room.onMessage(a, encode({
+      t: 'i', s: 1, f: 0, d: 0, r: false, j: false, c: 0, e: false,
+      y: 0.5, a: 0.1, w: 2,
+    }))
+
+    const p = room.players.get(1)
+    room._layout = {
+      ...generateLayout(room.seed),
+      ladders: [{ x: 2, z: 4, bottom: 0, top: 7.25 }],
+    }
+    p.pos = [1.234, 2.345, 3.456]
+    p.yaw = 0.5
+    p.pitch = 0.1
+    p.weapon = 2
+    p.verticalVel = 3.5
+    p.grounded = false
+    p.climbing = { x: 2, z: 4, bottom: 0, top: 7.25 }
+
+    room._snapshot(clock.t)
+    const snapshot = a.of('s').at(-1)
+    expect(snapshot.p[0]).toEqual([1, 1.23, 2.35, 3.46, 0.5, 0.1, 2, 0, 3.5, 0, 0]) // received, not yet applied
+    expect(decodeServer(JSON.stringify(snapshot)).ok).toBe(true)
+
+    p.movementMode = 'legacy'
+    room._snapshot(clock.t)
+    expect(a.of('s').at(-1).p[0]).toHaveLength(8)
+  })
+
   it('snapshot has the agreed shape and is skipped for players without a position', () => {
     const { room, clock } = mkRoom()
     const a = join(room, 'A'); const b = join(room, 'B')
@@ -210,6 +405,34 @@ describe('input and snapshots', () => {
     expect(s.p).toEqual([[1, 3.14, 1, 2, 0.5, 0.1, 2, 7]])
     expect(Object.keys(s).sort()).toEqual(['n', 'p', 'ts', 't'].sort())
     expect(a.of('s').pop().p.length).toBe(1) // everyone gets the same snapshot, including the sender (ack seq)
+  })
+
+  it('advances the simulation tick at a fixed 30 Hz cadence', () => {
+    const { room, clock } = mkRoom()
+    join(room)
+    room.onTick(clock.t)
+    expect(room.tickN).toBe(0)
+
+    clock.t += 1000 / 60
+    room.onTick(clock.t)
+    expect(room.tickN).toBe(0)
+
+    clock.t += 1000 / 60
+    room.onTick(clock.t)
+    expect(room.tickN).toBe(1)
+
+    clock.t += 1000 / 10
+    room.onTick(clock.t)
+    expect(room.tickN).toBe(4)
+  })
+
+  it('bounds simulation catch-up after a long stall', () => {
+    const { room, clock } = mkRoom()
+    join(room)
+    room.onTick(clock.t)
+    clock.t += 10000
+    room.onTick(clock.t)
+    expect(room.tickN).toBe(5)
   })
 
   it('sends ~20 snapshots per second from a 30 Hz tick', () => {

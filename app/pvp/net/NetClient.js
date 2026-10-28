@@ -21,7 +21,7 @@ function lerpAngle(a, b, k) {
 }
 
 export class NetClient {
-  // opts: { room, name, transportFactory(room)->Transport, getInput()->{p:[x,y,z],y,a,w}|null, storage?, clock? }
+  // opts: { room, name, transportFactory(room)->Transport, getInput()->legacy position or {mode:'commands',f,d,r,j,c,e,y,a,w}|null, storage?, clock? }
   constructor(opts) {
     this.room = opts.room
     this.name = opts.name
@@ -35,9 +35,11 @@ export class NetClient {
     this.seed = 0
     this.ackSeq = -1
     this.rtt = 0
+    this.clockOffset = null // server clock minus client clock
     this.roster = new Map() // id -> {id, name, slot}
     this._remote = new Map() // id -> samples[]
     this._seq = 0
+    this.pendingInputs = [] // command packets not yet acknowledged by a server snapshot
     this._t = null
     this._h = {}
     this._timers = { input: null, ping: null, retry: null }
@@ -99,6 +101,10 @@ export class NetClient {
         this._saveToken()
         this.roster.clear()
         this._remote.clear()
+        this.pendingInputs = []
+        this.ackSeq = -1
+        this.clockOffset = null
+        this.rtt = 0
         this.scores.clear()
         for (const [id, name, slot] of m.pl) this.roster.set(id, { id, name, slot })
         this._attempts = 0
@@ -112,12 +118,36 @@ export class NetClient {
       }
       case T.SNAPSHOT:
         for (const r of m.p) {
-          const [id, x, y, z, yaw, pitch, w, q] = r
-          if (id === this.selfId) { this.ackSeq = q; continue }
+          const [id, x, y, z, yaw, pitch, w, q, verticalVel, grounded, climbIndex] = r
+          if (id === this.selfId) {
+            this.ackSeq = q
+            while (this.pendingInputs.length && this.pendingInputs[0].s <= q) {
+              this.pendingInputs.shift()
+            }
+            this._emit('self-snapshot', {
+              id, x, y, z, yaw, pitch, w,
+              ...(r.length === 11 ? {
+                verticalVel,
+                grounded: grounded === 1,
+                climbIndex,
+              } : {}),
+              ackSeq: q, ts: m.ts, tick: m.n,
+              pendingInputs: this.pendingInputs.map((input) => ({ ...input })),
+            })
+            continue
+          }
           if (!this.roster.has(id)) continue
           let buf = this._remote.get(id)
           if (!buf) this._remote.set(id, (buf = []))
-          buf.push({ t: now, x, y, z, yaw, pitch, w })
+          // Convert server snapshot time into the local clock domain once aligned.
+          // Until the first pong, use arrival time to avoid mixing clock domains.
+          const sampleTime = this.clockOffset === null ? now : m.ts - this.clockOffset
+          const last = buf[buf.length - 1]
+          if (!last || sampleTime > last.t) {
+            buf.push({ t: sampleTime, x, y, z, yaw, pitch, w })
+          }
+          // Keep only a short history and reject samples that are too old.
+          while (buf.length > 24) buf.shift()
           if (buf.length > 24) buf.shift()
         }
         break
@@ -164,9 +194,20 @@ export class NetClient {
         this._remote.delete(m.id)
         this._emit('respawn', { id: m.id, slot: m.si })
         break
-      case T.PONG:
-        this.rtt = this.rtt ? this.rtt * 0.8 + (now - m.c) * 0.2 : now - m.c
+      case T.PONG: {
+        const measuredRtt = Math.max(0, now - m.c)
+        this.rtt = this.rtt ? this.rtt * 0.8 + measuredRtt * 0.2 : measuredRtt
+        // NTP-style midpoint estimate: server timestamp minus client midpoint.
+        const measuredOffset = m.ts - (m.c + now) / 2
+        if (this.clockOffset === null) {
+          this.clockOffset = measuredOffset
+          // Existing samples used arrival time; discard them to avoid mixed clocks.
+          this._remote.clear()
+        } else {
+          this.clockOffset = this.clockOffset * 0.8 + measuredOffset * 0.2
+        }
         break
+      }
       case T.ERROR:
         this._emit('server-error', { code: m.c })
         if (m.c === 'version') this._setStatus('error')
@@ -205,7 +246,30 @@ export class NetClient {
   _sendInput() {
     if (this.status !== 'playing' || !this._t) return
     const s = this.getInput()
-    if (!s || !s.p || ![...s.p, s.y, s.a, s.w].every(Number.isFinite)) return
+    if (!s) return
+
+    if (s.mode === 'commands') {
+      if (![s.f, s.d, s.y, s.a, s.w].every(Number.isFinite)) return
+      if (Math.abs(s.f) > 1 || Math.abs(s.d) > 1) return
+      if (typeof s.r !== 'boolean' || typeof s.j !== 'boolean' || typeof s.e !== 'boolean') return
+      if (!Number.isInteger(s.c) || s.c < -1 || s.c > 1) return
+      if (!Number.isInteger(s.w) || s.w < 0 || s.w > 15) return
+      const message = {
+        t: T.INPUT, s: ++this._seq,
+        f: round(s.f, 3), d: round(s.d, 3),
+        r: s.r, j: s.j, c: s.c, e: s.e,
+        y: round(s.y, 4), a: round(s.a, 4), w: s.w,
+      }
+      if (this._t.send(message) !== false) {
+        this.pendingInputs.push(message)
+        if (this.pendingInputs.length > 120) this.pendingInputs.shift()
+        this._emit('input-sent', message)
+      }
+      return
+    }
+
+    // Default legacy mode stays unchanged until client prediction is integrated.
+    if (!s.p || ![...s.p, s.y, s.a, s.w].every(Number.isFinite)) return
     this._t.send({
       t: T.INPUT, s: ++this._seq,
       p: [round(s.p[0], 3), round(s.p[1], 3), round(s.p[2], 3)],

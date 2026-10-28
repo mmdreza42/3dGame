@@ -7,12 +7,17 @@ import {
   decodeClient, encode, round, nextShard, seedFromRoom, makeToken,
 } from '../shared/protocol.js'
 import {
-  PLAYER_HP, RESPAWN_MS, SPAWN_PROTECT_MS, MAX_HIT_DIST, BUDGET_CAP_MS, damageFor, hitCost, teamOf, KILL_LIMIT, MATCH_END_MS,
+  PLAYER_HP, RESPAWN_MS, SPAWN_PROTECT_MS, MAX_HIT_DIST, BUDGET_CAP_MS, damageFor, hitCost, teamOf, pickSpawn, KILL_LIMIT, MATCH_END_MS,
 } from '../shared/combat.js'
 import { segmentClear } from '../shared/collide.js'
 import { generateLayout } from '../shared/layout.js'
+import { attachLadder, leaveLadder, startJump, stepHorizontalMovement, stepLadder, stepVerticalMovement } from '../shared/movement.js'
 
+const SIM_STEP_MS = 1000 / RATES.TICK_HZ
+const MAX_CATCH_UP_STEPS = 5
+const MAX_INPUT_QUEUE = 12
 const SNAP_MS = 1000 / RATES.SNAPSHOT_HZ
+const NO_MOVE_INPUT = Object.freeze({ forward: 0, strafe: 0, sprint: false, jump: false, climb: 0, interact: false })
 
 export class GameRoom {
   constructor(opts) {
@@ -29,18 +34,24 @@ export class GameRoom {
     this.byToken = new Map() // token -> player
     this.nextId = 1
     this.tickN = 0
+    this.simAcc = 0
     this.snapAcc = 0
     this.lastTickAt = null
     this.killsTotal = 0
     this.matchEndsAt = 0
     this._obstacles = opts.obstacles ?? null // AABB list; built lazily from the seed when not given
+    this._layout = null // deterministic gameplay layout, initialized when a command client spawns
   }
 
   // ----- adapter-facing -----
 
   onConnect(conn) {
     const now = this.now()
-    if (this.connectedCount() === 0) this.lastTickAt = null
+    if (this.connectedCount() === 0) {
+      this.lastTickAt = null
+      this.simAcc = 0
+      this.snapAcc = 0
+    }
     this.sessions.set(conn, { conn, player: null, tokens: LIMITS.MAX_MSG_PER_SEC, refillAt: now, strikes: 0, connectedAt: now })
   }
 
@@ -64,11 +75,53 @@ export class GameRoom {
     const p = s.player
     if (m.s <= p.lastSeq) return // stale or duplicate, ignore silently
     p.lastSeq = m.s
-    if (!p.alive) return // dead: ignore position until respawn
-    p.pos = m.p
-    p.yaw = m.y
-    p.pitch = m.a
-    p.weapon = m.w
+    if (!p.alive) return // dead: ignore input until respawn
+
+    if (Array.isArray(m.p)) {
+      // Legacy positions are directly applied and acknowledged immediately.
+      p.pos = m.p
+      p.moveInput = { ...NO_MOVE_INPUT }
+      p.inputQueue = []
+      p.movementMode = 'legacy'
+      p.pendingSpawnSlot = null
+      p.lastAppliedSeq = m.s
+      p.yaw = m.y
+      p.pitch = m.a
+      p.weapon = m.w
+    } else {
+      // Command inputs are acknowledged only after a simulation step consumes them.
+      const enteringCommandMode = p.movementMode !== 'commands'
+      if (enteringCommandMode || !p.pos) {
+        p.pendingSpawnSlot ??= p.slot
+        this._spawnAt(p)
+      }
+      if (enteringCommandMode) {
+        p.inputQueue = []
+        p.lastAppliedSeq = m.s - 1
+        p.moveInput = { ...NO_MOVE_INPUT }
+        p.jumpWasDown = false
+        p.interactWasDown = false
+      }
+      p.movementMode = 'commands'
+      p.inputAt = now
+      p.inputQueue ||= []
+      p.inputQueue.push({
+        seq: m.s,
+        forward: m.f,
+        strafe: m.d,
+        sprint: m.r,
+        jump: m.j,
+        climb: m.c,
+        interact: m.e,
+        yaw: m.y,
+        pitch: m.a,
+        weapon: m.w,
+      })
+      while (p.inputQueue.length > MAX_INPUT_QUEUE) {
+        const dropped = p.inputQueue.shift()
+        p.lastAppliedSeq = Math.max(p.lastAppliedSeq ?? -1, dropped.seq)
+      }
+    }
   }
 
   onDisconnect(conn) {
@@ -84,18 +137,35 @@ export class GameRoom {
   }
 
   onTick(now = this.now()) {
-    this.tickN++
-    const dt = this.lastTickAt === null ? 0 : Math.min(250, now - this.lastTickAt)
+    const elapsed = this.lastTickAt === null ? 0 : Math.max(0, now - this.lastTickAt)
     this.lastTickAt = now
+
+    // Wall-clock maintenance must run even when simulation time is capped.
     this._prune(now)
     this._respawns(now)
     for (const s of [...this.sessions.values()]) {
       if (!s.player && now - s.connectedAt > LIMITS.HELLO_TIMEOUT_MS) this._kick(s.conn, ERR.TIMEOUT, CLOSE.TIMEOUT)
     }
-    this.snapAcc += dt
+
+    // Fixed-step timing infrastructure. Gameplay remains client-reported for now.
+    this.simAcc += Math.min(elapsed, SIM_STEP_MS * MAX_CATCH_UP_STEPS)
+    let steps = 0
+    while (this.simAcc + 1e-7 >= SIM_STEP_MS && steps < MAX_CATCH_UP_STEPS) {
+      this.simAcc = Math.max(0, this.simAcc - SIM_STEP_MS)
+      this.tickN++
+      steps++
+      for (const p of this.players.values()) {
+        if (p.conn && p.alive && p.movementMode === 'commands' && p.pos) {
+          this._stepCommandPlayer(p, SIM_STEP_MS / 1000, now)
+        }
+      }
+    }
+
+    // Preserve the existing no-burst snapshot policy after stalls.
+    this.snapAcc += elapsed
     if (this.snapAcc >= SNAP_MS) {
       this.snapAcc -= SNAP_MS
-      if (this.snapAcc >= SNAP_MS) this.snapAcc = 0 // no catch-up bursts after a stall
+      if (this.snapAcc >= SNAP_MS) this.snapAcc = 0
       this._snapshot(now)
     }
   }
@@ -149,6 +219,10 @@ export class GameRoom {
     const p = {
       id: this.nextId++, name, token: this.makeToken(), slot, conn: null, goneAt: null,
       pos: null, yaw: 0, pitch: 0, weapon: 0, lastSeq: -1,
+      moveInput: { ...NO_MOVE_INPUT }, movementMode: 'legacy', pendingSpawnSlot: slot,
+      inputQueue: [], lastAppliedSeq: -1,
+      verticalVel: 0, grounded: true, climbing: null,
+      jumpWasDown: false, interactWasDown: false, inputAt: 0,
       hp: PLAYER_HP, alive: true, kills: 0, deaths: 0, respawnAt: 0, shieldUntil: 0, budget: BUDGET_CAP_MS, budgetAt: this.now(),
     }
     this.players.set(p.id, p)
@@ -182,6 +256,11 @@ export class GameRoom {
     if (t.hp > 0) return
     t.alive = false
     t.pos = null
+    t.moveInput = { ...NO_MOVE_INPUT }
+    if (t.inputQueue) t.inputQueue.length = 0
+    t.jumpWasDown = false
+    t.interactWasDown = false
+    t.moveInput = { ...NO_MOVE_INPUT }
     t.deaths++
     a.kills++
     this.killsTotal++
@@ -193,6 +272,113 @@ export class GameRoom {
       this.matchEndsAt = now + MATCH_END_MS
       this._broadcast({ t: T.MATCH, w: teamOf(a.slot), ms: MATCH_END_MS })
     }
+  }
+
+  _findNearbyLadder(state, ladders) {
+    for (const ladder of ladders) {
+      if (Math.abs(state.x - ladder.x) > 0.9) continue
+      const dz = state.z - ladder.z
+      if (state.feetY < 1.2 && dz > 0 && dz < 1.8) return { ladder, fromTop: false }
+      if (Math.abs(state.feetY - ladder.top) < 0.7 && dz > -1.6 && dz < 0.4) {
+        return { ladder, fromTop: true }
+      }
+    }
+    return null
+  }
+
+  _stepCommandPlayer(p, dt, now) {
+    if (this._layout === null) this._layout = generateLayout(this.seed)
+    const layout = this._layout
+    const stale = now - (p.inputAt ?? 0) > 250
+    if (stale) {
+      const lastQueued = p.inputQueue?.at(-1)
+      if (lastQueued) p.lastAppliedSeq = Math.max(p.lastAppliedSeq ?? -1, lastQueued.seq)
+      if (p.inputQueue) p.inputQueue.length = 0
+      p.moveInput = { ...NO_MOVE_INPUT }
+    } else if (p.inputQueue?.length) {
+      const next = p.inputQueue.shift()
+      p.lastAppliedSeq = next.seq
+      p.moveInput = {
+        forward: next.forward, strafe: next.strafe, sprint: next.sprint,
+        jump: next.jump, climb: next.climb, interact: next.interact,
+      }
+      p.yaw = next.yaw
+      p.pitch = next.pitch
+      p.weapon = next.weapon
+    }
+    const input = stale ? NO_MOVE_INPUT : (p.moveInput || NO_MOVE_INPUT)
+    let state = {
+      x: p.pos[0],
+      feetY: p.pos[1],
+      z: p.pos[2],
+      yaw: p.yaw,
+      verticalVel: p.verticalVel ?? 0,
+      grounded: p.grounded === true,
+      climbing: p.climbing ?? null,
+    }
+
+    const jumpPressed = input.jump === true && p.jumpWasDown !== true
+    const interactPressed = input.interact === true && p.interactWasDown !== true
+    p.jumpWasDown = input.jump === true
+    p.interactWasDown = input.interact === true
+
+    if (interactPressed) {
+      if (state.climbing) {
+        state = leaveLadder(state, false)
+      } else {
+        const found = this._findNearbyLadder(state, layout.ladders || [])
+        if (found) state = attachLadder(state, found.ladder, found.fromTop)
+      }
+    }
+
+    // Match the existing client auto-attach when walking forward onto a ladder base.
+    if (!state.climbing && !interactPressed && input.forward > 0 && Math.cos(state.yaw) > 0.35) {
+      const found = this._findNearbyLadder(state, layout.ladders || [])
+      if (found && !found.fromTop) state = attachLadder(state, found.ladder, false)
+    }
+
+    if (jumpPressed) state = startJump(state)
+
+    if (state.climbing) {
+      state = stepLadder(state, { climb: input.climb, sprint: input.sprint }, dt)
+    } else {
+      state = stepHorizontalMovement(state, {
+        forward: input.forward,
+        strafe: input.strafe,
+        sprint: input.sprint,
+        yaw: state.yaw,
+      }, dt, {
+        obstacles: layout.obstacles || [],
+        platforms: layout.platforms || [],
+        worldLimit: 99.5,
+      })
+      state = stepVerticalMovement(state, dt, layout.platforms || [])
+    }
+
+    p.pos = [state.x, state.feetY, state.z]
+    p.yaw = state.yaw
+    p.verticalVel = state.verticalVel ?? 0
+    p.grounded = state.grounded === true
+    p.climbing = state.climbing ?? null
+  }
+
+  _spawnAt(p) {
+    if (this._layout === null) this._layout = generateLayout(this.seed)
+    const slots = this._layout.playerSpawns || []
+    if (!slots.length) return false
+
+    const si = p.pendingSpawnSlot ?? p.slot
+    const spawn = pickSpawn(slots, teamOf(p.slot), si)
+    if (!spawn) return false
+
+    p.pos = [spawn.x, 0, spawn.z]
+    p.yaw = spawn.ry
+    p.pitch = 0
+    p.verticalVel = 0
+    p.grounded = true
+    p.climbing = null
+    p.pendingSpawnSlot = null
+    return true
   }
 
   // wire positions are FEET positions. Eye = feet + 1.6. Accept when the eye can see the target's chest OR head.
@@ -214,10 +400,15 @@ export class GameRoom {
       this.matchEndsAt = 0
       this.killsTotal = 0
       for (const p of this.players.values()) {
-        p.kills = 0; p.deaths = 0; p.alive = true; p.hp = PLAYER_HP; p.pos = null; p.shieldUntil = now + SPAWN_PROTECT_MS
+        const si = (p.slot * 2 + 1) % LIMITS.SPAWN_SLOTS
+        p.kills = 0; p.deaths = 0; p.alive = true; p.hp = PLAYER_HP; p.pos = null
+        p.moveInput = { ...NO_MOVE_INPUT }; p.pendingSpawnSlot = si
+        p.inputQueue = []; p.jumpWasDown = false; p.interactWasDown = false
+        p.verticalVel = 0; p.grounded = true; p.climbing = null
+        p.shieldUntil = now + SPAWN_PROTECT_MS
       }
       this._broadcast(this._scoresMsg())
-      for (const p of this.players.values()) this._broadcast({ t: T.RESPAWN, id: p.id, si: (p.slot * 2 + 1) % LIMITS.SPAWN_SLOTS })
+      for (const p of this.players.values()) this._broadcast({ t: T.RESPAWN, id: p.id, si: p.pendingSpawnSlot })
       return
     }
     for (const p of this.players.values()) {
@@ -225,8 +416,13 @@ export class GameRoom {
       p.alive = true
       p.hp = PLAYER_HP
       p.pos = null
+      p.moveInput = { ...NO_MOVE_INPUT }
+      p.inputQueue = []; p.jumpWasDown = false; p.interactWasDown = false
+      p.verticalVel = 0; p.grounded = true; p.climbing = null
+      const si = (p.slot + p.deaths * 7) % LIMITS.SPAWN_SLOTS
+      p.pendingSpawnSlot = si
       p.shieldUntil = now + SPAWN_PROTECT_MS
-      this._broadcast({ t: T.RESPAWN, id: p.id, si: (p.slot + p.deaths * 7) % LIMITS.SPAWN_SLOTS })
+      this._broadcast({ t: T.RESPAWN, id: p.id, si })
     }
   }
 
@@ -243,7 +439,21 @@ export class GameRoom {
     const rows = []
     for (const p of this.players.values()) {
       if (!p.conn || !p.pos || !p.alive) continue
-      rows.push([p.id, round(p.pos[0], 2), round(p.pos[1], 2), round(p.pos[2], 2), round(p.yaw, 3), round(p.pitch, 3), p.weapon, p.lastSeq])
+      const ackSeq = p.movementMode === 'commands' ? (p.lastAppliedSeq ?? -1) : p.lastSeq
+      const row = [p.id, round(p.pos[0], 2), round(p.pos[1], 2), round(p.pos[2], 2), round(p.yaw, 3), round(p.pitch, 3), p.weapon, ackSeq]
+      // Keep legacy rows unchanged; command clients also need vertical state for reconciliation.
+      if (p.movementMode === 'commands') {
+        if (this._layout === null) this._layout = generateLayout(this.seed)
+        const climbIndex = p.climbing
+          ? (this._layout.ladders || []).findIndex((ladder) =>
+              ladder.x === p.climbing.x &&
+              ladder.z === p.climbing.z &&
+              ladder.bottom === p.climbing.bottom &&
+              ladder.top === p.climbing.top)
+          : -1
+        row.push(round(p.verticalVel ?? 0, 3), p.grounded === true ? 1 : 0, climbIndex)
+      }
+      rows.push(row)
     }
     const str = encode({ t: T.SNAPSHOT, n: this.tickN, ts: now, p: rows })
     for (const p of this.players.values()) if (p.conn) this._sendRaw(p.conn, str)

@@ -7,6 +7,7 @@ export default defineNuxtConfig({
   ],
   nitro: {
     preset: 'cloudflare-durable',
-    experimental: { websocket: true }
+    experimental: { websocket: true },
+    externals: { inline: [/[\\/]shared[\\/]/] }
   }
 })

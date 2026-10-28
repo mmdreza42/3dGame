@@ -111,12 +111,26 @@ const CLIENT = {
     return null
   },
   [T.INPUT](m) {
-    if (!onlyKeys(m, ['t', 's', 'p', 'y', 'a', 'w'])) return 'keys'
     if (!isInt(m.s, 0, 2147483647)) return 's'
-    if (!Array.isArray(m.p) || m.p.length !== 3 || !m.p.every(isNum)) return 'p'
-    const [x, y, z] = m.p
-    const L = LIMITS.WORLD_LIMIT
-    if (Math.abs(x) > L || Math.abs(z) > L || y < LIMITS.Y_MIN || y > LIMITS.Y_MAX) return 'p range'
+
+    // Legacy position updates remain supported while movement authority is migrated.
+    if (Object.prototype.hasOwnProperty.call(m, 'p')) {
+      if (!onlyKeys(m, ['t', 's', 'p', 'y', 'a', 'w'])) return 'keys'
+      if (!Array.isArray(m.p) || m.p.length !== 3 || !m.p.every(isNum)) return 'p'
+      const [x, py, z] = m.p
+      const L = LIMITS.WORLD_LIMIT
+      if (Math.abs(x) > L || Math.abs(z) > L || py < LIMITS.Y_MIN || py > LIMITS.Y_MAX) return 'p range'
+    } else {
+      // Command input: axes, sprint, jump, and ladder direction.
+      if (!onlyKeys(m, ['t', 's', 'f', 'd', 'r', 'j', 'c', 'e', 'y', 'a', 'w'])) return 'keys'
+      if (!isNum(m.f) || Math.abs(m.f) > 1) return 'f'
+      if (!isNum(m.d) || Math.abs(m.d) > 1) return 'd'
+      if (typeof m.r !== 'boolean') return 'r'
+      if (typeof m.j !== 'boolean') return 'j'
+      if (!isInt(m.c, -1, 1)) return 'c'
+      if (typeof m.e !== 'boolean') return 'e'
+    }
+
     if (!isNum(m.y) || Math.abs(m.y) > 1000) return 'y'
     if (!isNum(m.a) || Math.abs(m.a) > 4) return 'a'
     if (!isInt(m.w, 0, 15)) return 'w'
@@ -158,7 +172,12 @@ const SERVER = {
     if (!isInt(m.n, 0, 2147483647) || !isNum(m.ts)) return 'n/ts'
     if (!Array.isArray(m.p) || m.p.length > LIMITS.MAX_PLAYERS) return 'p'
     for (const r of m.p) {
-      if (!Array.isArray(r) || r.length !== 8 || !r.every(isNum) || !Number.isInteger(r[0]) || r[0] < 1) return 'row'
+      if (!Array.isArray(r) || (r.length !== 8 && r.length !== 11) ||
+          !r.every(isNum) || !Number.isInteger(r[0]) || r[0] < 1) return 'row'
+      if (r.length === 11) {
+        if (r[9] !== 0 && r[9] !== 1) return 'grounded'
+        if (!Number.isInteger(r[10]) || r[10] < -1 || r[10] > 15) return 'climb'
+      }
     }
     return null
   },

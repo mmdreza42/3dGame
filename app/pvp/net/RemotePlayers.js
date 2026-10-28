@@ -96,7 +96,7 @@ export class RemotePlayers {
     const T = this.T
     const group = new T.Group()
     const model = this.cloneModel(gltf.scene)
-    model.rotation.y = Math.PI // the model faces +Z, our forward is -Z
+    model.rotation.y = 0 // match the local player orientation; group yaw supplies facing
     const tint = new T.Color(TEAM_COLORS[teamOf(p.slot)]).lerp(new T.Color(0xffffff), 0.35)
     const mats = []
     model.traverse((o) => {
@@ -146,6 +146,25 @@ export class RemotePlayers {
     next.reset()
     next.play()
     if (prev) prev.crossFadeTo(next, 0.2, false)
+  }
+
+  takeForRagdoll(id) {
+    const e = this.map.get(id)
+    if (!e) return null
+    this.map.delete(id)
+    if (e.mixer) e.mixer.stopAllAction()
+    let cleaned = false
+    return {
+      mesh: e.group,
+      cleanup: () => {
+        if (cleaned) return
+        cleaned = true
+        if (e.mat) e.mat.dispose()
+        if (e.mats) for (const m of e.mats) m.dispose()
+        if (e.tagMat) e.tagMat.dispose()
+        if (e.tagTex) e.tagTex.dispose()
+      },
+    }
   }
 
   _remove(id) {

@@ -26,11 +26,14 @@ const mkModel = () => {
 }
 
 describe('RemotePlayers with the soldier model', () => {
-  it('uses the soldier when the model is loaded', () => {
+  it('uses the soldier and applies remote yaw at the player group', () => {
     const scene = mkScene()
     const r = new RemotePlayers(scene, FakeTHREE, { getSoldier: () => GLTF, cloneModel: mkModel, now: () => 0 })
-    r.update([P(2, 'BOB')])
+    r.update([P(2, 'BOB', 0)])
     expect(r.map.get(2).kind).toBe('soldier')
+    expect(r.map.get(2).group.children[0].rotation.y).toBe(0)
+    r.update([{ ...P(2, 'BOB'), yaw: Math.PI / 2 }])
+    expect(r.map.get(2).group.rotation.y).toBeCloseTo(Math.PI / 2)
     expect(scene.items.length).toBe(1)
   })
   it('starts as a capsule and upgrades when the model arrives', () => {
@@ -54,6 +57,20 @@ describe('RemotePlayers with the soldier model', () => {
     for (let i = 0; i < 25; i++) { t += 100; r.update([P(2, 'BOB', 9)]) }
     expect(r.map.get(2).state).toBe('idle')
   })
+  it('detaches a remote soldier for ragdoll without removing it from the scene', () => {
+    const scene = mkScene()
+    const r = new RemotePlayers(scene, FakeTHREE, { getSoldier: () => GLTF, cloneModel: mkModel, now: () => 0 })
+    r.update([P(2, 'BOB')])
+    const corpse = r.takeForRagdoll(2)
+    expect(corpse).not.toBeNull()
+    expect(r.count).toBe(0)
+    expect(scene.items).toContain(corpse.mesh)
+    corpse.cleanup()
+    scene.remove(corpse.mesh)
+    expect(scene.items).toHaveLength(0)
+    expect(r.takeForRagdoll(2)).toBeNull()
+  })
+
   it('dispose frees the cloned materials and stops the mixer', () => {
     const scene = mkScene()
     const r = new RemotePlayers(scene, FakeTHREE, { getSoldier: () => GLTF, cloneModel: mkModel, now: () => 0 })

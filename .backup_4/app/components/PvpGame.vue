@@ -116,7 +116,8 @@
     <div v-if="gameState === 'name'" style="position:fixed;inset:0;background:rgba(0,0,0,0.95);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:110;color:#fff;font-family:'Courier New', monospace;">
       <h1 style="font-size:56px;margin:0;color:#00ffff;text-shadow:0 0 30px #00ffff;letter-spacing:8px;">NEXUS STRIKE</h1>
       <p style="color:#ff0055;margin:10px 0 30px;font-size:18px;letter-spacing:3px;">ENTER YOUR CALLSIGN</p>
-      <input v-model="nameInput" maxlength="16" autofocus placeholder="3-16 characters" @keydown.enter.prevent="submitName" @keydown.stop @keyup.stop
+      <input
+v-model="nameInput" maxlength="16" autofocus placeholder="3-16 characters" @keydown.enter.prevent="submitName" @keydown.stop @keyup.stop
         style="width:320px;padding:12px;font:bold 22px 'Courier New', monospace;text-align:center;color:#00ffff;background:#05121a;border:2px solid #00ffff;outline:none;box-shadow:0 0 15px rgba(0,255,255,0.3);" />
       <div style="height:24px;margin-top:10px;color:#ff0055;font-size:14px;">{{ nameError }}</div>
       <button @click="submitName" style="margin-top:10px;padding:14px 40px;font-size:22px;font-weight:bold;background:#00ffff;color:#000;border:none;border-radius:2px;cursor:pointer;box-shadow:0 0 20px #00ffff;">CONFIRM</button>

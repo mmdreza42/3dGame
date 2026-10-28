@@ -86,12 +86,12 @@ export function migrateProfile(raw, { legacyBest = 0, now = Date.now() } = {}) {
 }
 
 export function loadProfile(storage, opts = {}) {
-  let raw = null
+  let raw
   try {
     const text = storage.getItem(PROFILE_KEY)
     raw = text ? JSON.parse(text) : null
   } catch { raw = null }                       // corrupt JSON -> start fresh (name will be asked again)
-  let legacyBest = 0
+  let legacyBest
   try { legacyBest = parseInt(storage.getItem(LEGACY_HIGHSCORE_KEY) || '0', 10) || 0 } catch { legacyBest = 0 }
   return migrateProfile(raw, { legacyBest, now: opts.now })
 }

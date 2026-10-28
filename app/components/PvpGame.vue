@@ -118,7 +118,7 @@
       <div style="margin-bottom:8px;"><span style="color:#00ffff;">CYAN {{ teamKills[0] }}</span> <span style="color:#aaa;">:</span> <span style="color:#ff9a3c;">{{ teamKills[1] }} ORANGE</span> <span style="color:#666;">· FIRST TO {{ KILL_LIMIT }}</span></div>
       <div v-for="p in netRoster" :key="p.id" :style="{ color: p.team === 0 ? '#00ffff' : '#ff9a3c', fontWeight: p.self ? 'bold' : 'normal', padding: '2px 0' }"><span style="display:inline-block;min-width:150px;">{{ p.name }}<span v-if="p.self" style="color:#ff0055;"> (YOU)</span></span><span style="color:#00ffaa;display:inline-block;min-width:50px;text-align:right;">K {{ p.k }}</span><span style="color:#ff0055;display:inline-block;min-width:50px;text-align:right;">D {{ p.d }}</span></div>
     </div>
-    <div v-if="netMode.multi && gameState === 'playing' && lockLost" style="position:fixed;top:60%;left:50%;transform:translateX(-50%);z-index:90;pointer-events:none;font:bold 28px 'Courier New', monospace;color:#00ffff;text-shadow:0 0 15px #00ffff,0 2px 4px #000;">CLICK TO RESUME</div>
+    <button v-if="netMode.multi && gameState === 'playing' && lockLost" @mousedown.stop @click="requestGamePointerLock" style="position:fixed;top:60%;left:50%;transform:translateX(-50%);z-index:130;pointer-events:auto;cursor:pointer;border:1px solid #00ffff;background:rgba(0,0,0,0.7);padding:8px 14px;font:bold 28px 'Courier New', monospace;color:#00ffff;text-shadow:0 0 15px #00ffff,0 2px 4px #000;">CLICK TO RESUME</button>
     <div v-if="netMode.multi && netStatus === 'full'" style="position:fixed;inset:0;background:rgba(0,0,0,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:130;color:#fff;font-family:'Courier New', monospace;">
       <h1 style="font-size:48px;margin:0;color:#ff0055;text-shadow:0 0 20px #ff0055;">ROOM FULL</h1>
       <p style="margin-top:16px;color:#aaa;">This room has {{ ROOM_CAPACITY }} players. Ask for another room code (?room=...).</p>
@@ -128,7 +128,8 @@
     <div v-if="gameState === 'name'" style="position:fixed;inset:0;background:rgba(0,0,0,0.95);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:110;color:#fff;font-family:'Courier New', monospace;">
       <h1 style="font-size:56px;margin:0;color:#00ffff;text-shadow:0 0 30px #00ffff;letter-spacing:8px;">NEXUS STRIKE</h1>
       <p style="color:#ff0055;margin:10px 0 30px;font-size:18px;letter-spacing:3px;">ENTER YOUR CALLSIGN</p>
-      <input v-model="nameInput" maxlength="16" autofocus placeholder="3-16 characters" @keydown.enter.prevent="submitName" @keydown.stop @keyup.stop
+      <input
+v-model="nameInput" maxlength="16" autofocus placeholder="3-16 characters" @keydown.enter.prevent="submitName" @keydown.stop @keyup.stop
         style="width:320px;padding:12px;font:bold 22px 'Courier New', monospace;text-align:center;color:#00ffff;background:#05121a;border:2px solid #00ffff;outline:none;box-shadow:0 0 15px rgba(0,255,255,0.3);" />
       <div style="height:24px;margin-top:10px;color:#ff0055;font-size:14px;">{{ nameError }}</div>
       <button @click="submitName" style="margin-top:10px;padding:14px 40px;font-size:22px;font-weight:bold;background:#00ffff;color:#000;border:none;border-radius:2px;cursor:pointer;box-shadow:0 0 20px #00ffff;">CONFIRM</button>
@@ -172,6 +173,7 @@ import { CinematicShader } from '../game/shader.js'
 import { initAudio, playSound } from '../game/audio.js'
 import { buildWorld } from '../pvp/world.js'
 import { generateLayout, layoutHash, parseSeed } from '~~/shared/layout.js'
+import { stepCommandPrediction } from '~~/shared/prediction.js'
 import { rayVsList, segmentClear, pointInAABB } from '~~/shared/collide.js'
 import { validateName } from '~~/shared/names.js'
 import { createProfileStore, safeStorage } from '../pvp/profile.js'
@@ -233,6 +235,7 @@ const linkCopied = ref(false)
 const showScoreboard = ref(false)
 const lockLost = ref(false)
 let net = null, remotes = null, offNet = [], statTimer = null, spawnedOnce = false, prevRoster = null
+let predictionState = null, lastPredictionCommand = null, jumpCommandPending = false, interactCommandPending = false
 // profile (name, best score, lifetime stats) lives in localStorage; see app/pvp/profile.js
 const store = createProfileStore(safeStorage(() => window.localStorage))
 const highScore = ref(store.get().bestScore)
@@ -264,8 +267,65 @@ function placeAtSpawn(slot) {
   me.x = s.x; me.z = s.z; me.ry = s.ry
   camera.position.x = s.x; camera.position.z = s.z; camera.position.y = 1.6
   verticalVel = 0; isGrounded = true; climbing = null
+  predictionState = {
+    x: me.x, z: me.z, feetY: camera.position.y - 1.6, yaw: me.ry,
+    pitch: camera.rotation.x, weapon: Math.max(0, WEAPON_LIST.indexOf(currentWeapon.value)),
+    verticalVel: 0, grounded: true, climbing: null,
+    jumpWasDown: false, interactWasDown: false,
+  }
+  lastPredictionCommand = null
+  jumpCommandPending = false; interactCommandPending = false
   spawnedOnce = true
   return true
+}
+
+function isCommandMultiplayer() {
+  return Boolean(netMode.multi && net && net.status === 'playing' && layout)
+}
+
+function predictionConfig() {
+  return {
+    obstacles: layout?.obstacles || [],
+    platforms: layout?.platforms || [],
+    ladders: layout?.ladders || [],
+  }
+}
+
+function applyPredictionState(state) {
+  predictionState = state
+  me.x = state.x
+  me.z = state.z
+  // Keep local mouse aim immediate; snapshots must not roll the camera yaw backward.
+  verticalVel = state.verticalVel || 0
+  isGrounded = state.grounded === true
+  climbing = state.climbing || null
+  camera.position.set(me.x, state.feetY + 1.6 - landingKick, me.z)
+}
+
+function predictSentCommand(command) {
+  if (!isCommandMultiplayer() || !predictionState) return
+  // Save the latest network command; prediction itself runs every rendered frame.
+  lastPredictionCommand = { ...command }
+  if (command.j) jumpCommandPending = false
+  if (command.e) interactCommandPending = false
+}
+
+function reconcileSelfSnapshot(snapshot) {
+  if (!isCommandMultiplayer() || !layout) return
+  const ladderIndex = Number.isInteger(snapshot.climbIndex) ? snapshot.climbIndex : -1
+  const state = {
+    x: snapshot.x, z: snapshot.z, feetY: snapshot.y, yaw: snapshot.yaw,
+    pitch: snapshot.pitch, weapon: snapshot.w,
+    verticalVel: Number.isFinite(snapshot.verticalVel) ? snapshot.verticalVel : 0,
+    grounded: snapshot.grounded === true,
+    climbing: ladderIndex >= 0 ? (layout.ladders || [])[ladderIndex] || null : null,
+    jumpWasDown: false, interactWasDown: false,
+  }
+  let replayed = state
+  for (const command of snapshot.pendingInputs || []) {
+    replayed = stepCommandPrediction(replayed, command, 1 / 30, predictionConfig())
+  }
+  applyPredictionState(replayed)
 }
 
 function syncNetUi() {
@@ -277,6 +337,7 @@ function syncNetUi() {
 }
 
 let remoteList = [], mpTimer = null, mpRespawnAt = 0
+const remoteDeaths = new Set()
 const myTeam = ref(0)
 const matchWinner = ref(-1)
 const teamKills = computed(() => { const t = [0, 0]; for (const p of netRoster.value) t[p.team] += p.k; return t })
@@ -305,7 +366,21 @@ function onNetDamage(d) {
   }
   if (d.hp > 0) return
   addKillFeed(nameOfId(d.by) + ' > ' + nameOfId(d.id) + (d.head ? ' (headshot)' : ''))
-  if (!mine || gameState.value !== 'playing') return
+  if (!mine) {
+    if (d.hp <= 0) {
+      remoteDeaths.add(d.id)
+      const corpse = remotes?.takeForRagdoll(d.id)
+      if (corpse) {
+        ragdolls.push({
+          mesh: corpse.mesh, cartoon: true, state: 'freeze', stateTimer: 0.15, bounces: 0,
+          vx: 0, vy: 0, vz: 0, rx: 0, ry: 0, rz: 0, life: 4.0,
+          cleanup: corpse.cleanup,
+        })
+      }
+    }
+    return
+  }
+  if (gameState.value !== 'playing') return
   gameState.value = 'mpdead'
   lmbDown = false; rmbDown = false; climbing = null; adsT = 0
   scopeVisible.value = false
@@ -339,6 +414,19 @@ function startNet() {
     transportFactory: (room) => new WebSocketTransport({ url: resolveWsUrl(room, { base, hostname: window.location.hostname }) }),
     getInput: () => {
       if (!camera || gameState.value !== 'playing') return null // at the menu you are not in the world yet
+      if (netMode.multi && layout) {
+        const f = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0)
+        const d = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0)
+        const aiming = rmbDown && !isReloading.value && !predictionState?.climbing
+        const moving = !predictionState?.climbing && (f !== 0 || d !== 0)
+        return {
+          mode: 'commands', f, d,
+          r: Boolean(moving && !aiming && (keys.ShiftLeft || keys.ShiftRight)),
+          j: jumpCommandPending, c: predictionState?.climbing ? f : 0,
+          e: interactCommandPending, y: me.ry, a: camera.rotation.x,
+          w: Math.max(0, WEAPON_LIST.indexOf(currentWeapon.value)),
+        }
+      }
       return { p: [me.x, camera.position.y - 1.6, me.z], y: me.ry, a: camera.rotation.x, w: Math.max(0, WEAPON_LIST.indexOf(currentWeapon.value)) }
     },
   })
@@ -362,7 +450,16 @@ function startNet() {
     net.on('lost', () => { netNote.value = 'CONNECTION LOST: reload the page' }),
     net.on('damage', onNetDamage),
     net.on('scores', () => syncNetUi()),
-    net.on('respawn', (d) => { onNetRespawn(d); if (d.id === net.selfId) matchWinner.value = -1 }),
+    net.on('input-sent', predictSentCommand),
+    net.on('self-snapshot', reconcileSelfSnapshot),
+    net.on('respawn', (d) => {
+      if (d.id !== net.selfId) {
+        remoteDeaths.delete(d.id)
+        net._remote.delete(d.id)
+      }
+      onNetRespawn(d)
+      if (d.id === net.selfId) matchWinner.value = -1
+    }),
     net.on('match', (d) => { matchWinner.value = d.winner; setTimeout(() => { matchWinner.value = -1 }, d.ms + 1500) }),
     net.on('server-error', (d) => { if (d.code === 'version') netNote.value = 'VERSION MISMATCH: reload the page' }),
   ]
@@ -378,6 +475,9 @@ function stopNet() {
   if (net) { net.close(); net = null }
   if (remotes) { remotes.dispose(); remotes = null }
   netStatus.value = 'idle'; netRoster.value = []; netNote.value = ''; spawnedOnce = false; prevRoster = null
+  predictionState = null; lastPredictionCommand = null
+  jumpCommandPending = false; interactCommandPending = false
+  remoteDeaths.clear()
 }
 
 async function copyRoomLink() {
@@ -528,7 +628,22 @@ function buyUpgrade(type) {
   else if (type === 'reload' && scrap.value >= 200) { scrap.value -= 200; reloadMult.value += 0.20; playSound('reload') }
 }
 
-function startNextWave() { wave.value++; climbing = null; gameState.value = 'playing'; renderer.domElement.requestPointerLock(); spawnWave() }
+function requestGamePointerLock() {
+  const element = renderer?.domElement
+  if (!element || document.pointerLockElement === element) return
+  try {
+    const result = element.requestPointerLock()
+    if (result && typeof result.catch === 'function') {
+      result.catch(() => {
+        if (netMode.multi) lockLost.value = gameState.value === 'playing'
+      })
+    }
+  } catch {
+    if (netMode.multi) lockLost.value = gameState.value === 'playing'
+  }
+}
+
+function startNextWave() { wave.value++; climbing = null; gameState.value = 'playing'; requestGamePointerLock(); spawnWave() }
 
 function spawnParticles(pos, color, count) {
   for (let i = 0; i < count; i++) {
@@ -879,7 +994,7 @@ function explode(x, z) {
 
 function startGame() {
   initAudio()
-  if (gameState.value === 'paused') { renderer.domElement.requestPointerLock(); return }
+  if (gameState.value === 'paused') { requestGamePointerLock(); return }
   if (gameState.value === 'menu' || gameState.value === 'dead') {
     playerHp.value = 100; maxHp.value = 100
     me.x = 0; me.z = 0; me.ry = 0; camera.rotation.x = 0
@@ -899,7 +1014,7 @@ function startGame() {
     enemies = []; lootItems.length = 0; playerLasers.length = 0
     if (netMode.multi) { spawnedOnce = false; placeAtSpawn() } else spawnWave() // multiplayer: no PvE waves until step 6
     gameState.value = 'playing'
-    renderer.domElement.requestPointerLock()
+    requestGamePointerLock()
   }
 }
 
@@ -1102,12 +1217,14 @@ onMounted(() => {
     keys[e.code] = true
     if (e.code === 'Tab' && netMode.multi && gameState.value === 'playing') { e.preventDefault(); showScoreboard.value = true }
     if (gameState.value !== 'playing') return
-    if (e.code === 'Space') {
-      if (climbing) leaveLadder(true)
+    if (e.code === 'Space' && !e.repeat) {
+      if (isCommandMultiplayer()) jumpCommandPending = true
+      else if (climbing) leaveLadder(true)
       else if (isGrounded) { verticalVel = 8; isGrounded = false; landingKick = 0.1 }
     }
     if (e.code === 'KeyE' && !e.repeat) {
-      if (climbing) leaveLadder(false)
+      if (isCommandMultiplayer()) interactCommandPending = true
+      else if (climbing) leaveLadder(false)
       else { const lad = findLadder(); if (lad) attachLadder(lad.L, lad.fromTop) }
     }
     if (e.code === 'KeyR') reloadWeapon()
@@ -1129,7 +1246,7 @@ onMounted(() => {
     camera.rotation.x = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, camera.rotation.x))
   }
   onMouseDown = (e) => {
-    if (document.pointerLockElement !== renderer.domElement) { if (gameState.value === 'playing') renderer.domElement.requestPointerLock(); return }
+    if (document.pointerLockElement !== renderer.domElement) { if (gameState.value === 'playing') requestGamePointerLock(); return }
     if (gameState.value !== 'playing') return
     if (e.button === 0) { lmbDown = true; shoot() }
     if (e.button === 2) rmbDown = true
@@ -1241,57 +1358,74 @@ onMounted(() => {
     bloom = Math.max(0, bloom - dt * 0.05)
     camera.rotation.y = me.ry
 
-    if (net && remotes) { remoteList = net.sample(); remotes.update(remoteList) }
+    if (net && remotes) {
+      remoteList = net.sample().filter((p) => !remoteDeaths.has(p.id))
+      remotes.update(remoteList)
+    }
 
     crossGap.value = Math.round(5 + currentSpread() * innerHeight * 0.7)
     updateViewModel(dt, now, k, isMoving, sprinting)
 
-    // ---- ladder / platform movement ----
-    const feetY = camera.position.y - 1.6
-    const floorY = floorAt(me.x, me.z, feetY)
-
-    if (climbing) {
-      climbPrompt.value = 'W / S  CLIMB    SPACE  JUMP OFF'
-      updateClimb(dt)
-    } else {
-      const lad = findLadder()
-      climbPrompt.value = lad ? (lad.fromTop ? '[E]  CLIMB DOWN' : '[E]  CLIMB LADDER') : ''
-      if (lad && !lad.fromTop && keys.KeyW && Math.cos(me.ry) > 0.35) attachLadder(lad.L, false)
-    }
-
-    if (!climbing) {
-      const speed = (aiming ? cfg.adsMove : 6) * (sprinting ? 1.8 : 1)
-      let f = fwd, s = strafe
-      const len = Math.hypot(f, s)
-      if (len > 1) { f /= len; s /= len }     // diagonal movement is no longer faster
-      const nextX = me.x + (-Math.sin(me.ry) * f + Math.cos(me.ry) * s) * speed * dt
-      const nextZ = me.z + (-Math.cos(me.ry) * f - Math.sin(me.ry) * s) * speed * dt
-
-      const plat = floorY > 0 ? platformAt(me.x, me.z, feetY) : null
-      const checkCollision = (nx, nz) => {
-        if (nx < -99.5 || nx > 99.5 || nz < -99.5 || nz > 99.5) return true
-        if (plat) {
-          // on a tower deck: the railing stops you, except at the ladder gap
-          const inside = Math.abs(nx - plat.x) < plat.hw - 0.4 && Math.abs(nz - plat.z) < plat.hd - 0.4
-          const inGap = plat.gap && Math.abs(nx - plat.gap.x) < plat.gap.hw && nz >= plat.z
-          if (!inside && !inGap) return true
-        }
-        for (let i = 0; i < colliders.length; i++) if (pointInAABB(nx, floorY + 1.0, nz, colliders[i], 0.5)) return true
-        return false
+    // Predict locally every rendered frame; the network still sends commands at 30 Hz.
+    if (isCommandMultiplayer() && predictionState) {
+      if (lastPredictionCommand) {
+        applyPredictionState(
+          stepCommandPrediction(predictionState, lastPredictionCommand, dt, predictionConfig()),
+        )
       }
-      if (!checkCollision(nextX, me.z)) me.x = nextX
-      if (!checkCollision(me.x, nextZ)) me.z = nextZ
-
-      const newFloor = floorAt(me.x, me.z, feetY)
-      camera.position.y += verticalVel * dt; verticalVel -= 25 * dt
-      if (camera.position.y <= newFloor + 1.6) {
-        if (!isGrounded) landingKick = 0.15
-        camera.position.y = newFloor + 1.6; verticalVel = 0; isGrounded = true
-      } else isGrounded = false
+      climbing = predictionState.climbing || null
+      climbPrompt.value = climbing
+        ? 'W / S  CLIMB    SPACE  JUMP OFF'
+        : (findLadder()?.fromTop ? '[E]  CLIMB DOWN' : (findLadder() ? '[E]  CLIMB LADDER' : ''))
       landingKick = THREE.MathUtils.lerp(landingKick, 0, Math.min(1, dt * 10))
-      camera.position.y -= landingKick
+      camera.position.set(me.x, predictionState.feetY + 1.6 - landingKick, me.z)
+    } else {
+      // ---- original single-player / legacy movement ----
+      const feetY = camera.position.y - 1.6
+      const floorY = floorAt(me.x, me.z, feetY)
+
+      if (climbing) {
+        climbPrompt.value = 'W / S  CLIMB    SPACE  JUMP OFF'
+        updateClimb(dt)
+      } else {
+        const lad = findLadder()
+        climbPrompt.value = lad ? (lad.fromTop ? '[E]  CLIMB DOWN' : '[E]  CLIMB LADDER') : ''
+        if (lad && !lad.fromTop && keys.KeyW && Math.cos(me.ry) > 0.35) attachLadder(lad.L, false)
+      }
+
+      if (!climbing) {
+        const speed = (aiming ? cfg.adsMove : 6) * (sprinting ? 1.8 : 1)
+        let f = fwd, s = strafe
+        const len = Math.hypot(f, s)
+        if (len > 1) { f /= len; s /= len }
+        const nextX = me.x + (-Math.sin(me.ry) * f + Math.cos(me.ry) * s) * speed * dt
+        const nextZ = me.z + (-Math.cos(me.ry) * f - Math.sin(me.ry) * s) * speed * dt
+
+        const plat = floorY > 0 ? platformAt(me.x, me.z, feetY) : null
+        const checkCollision = (nx, nz) => {
+          if (nx < -99.5 || nx > 99.5 || nz < -99.5 || nz > 99.5) return true
+          if (plat) {
+            const inside = Math.abs(nx - plat.x) < plat.hw - 0.4 && Math.abs(nz - plat.z) < plat.hd - 0.4
+            const inGap = plat.gap && Math.abs(nx - plat.gap.x) < plat.gap.hw && nz >= plat.z
+            if (!inside && !inGap) return true
+          }
+          for (let i = 0; i < colliders.length; i++) if (pointInAABB(nx, floorY + 1.0, nz, colliders[i], 0.5)) return true
+          return false
+        }
+        if (!checkCollision(nextX, me.z)) me.x = nextX
+        if (!checkCollision(me.x, nextZ)) me.z = nextZ
+
+        const newFloor = floorAt(me.x, me.z, feetY)
+        camera.position.y += verticalVel * dt; verticalVel -= 25 * dt
+        if (camera.position.y <= newFloor + 1.6) {
+          if (!isGrounded) landingKick = 0.15
+          camera.position.y = newFloor + 1.6; verticalVel = 0; isGrounded = true
+        } else isGrounded = false
+        landingKick = THREE.MathUtils.lerp(landingKick, 0, Math.min(1, dt * 10))
+        camera.position.y -= landingKick
+      }
+      camera.position.x = me.x; camera.position.z = me.z
     }
-    camera.position.x = me.x; camera.position.z = me.z
   }
 
   function updateCombat(dt) {
@@ -1491,6 +1625,7 @@ onMounted(() => {
           }
           if (r.life <= 0) {
             scene.remove(r.mesh)
+            r.cleanup?.()
             ragdolls.splice(i, 1)
           }
         }
@@ -1506,7 +1641,11 @@ onMounted(() => {
         }
         r.mesh.scale.lerp(new THREE.Vector3(1, 1, 1), dt * 5)
         if (r.life < 1.5) r.mesh.scale.setScalar(Math.max(0.01, r.life / 1.5))
-        if (r.life <= 0) { scene.remove(r.mesh); ragdolls.splice(i, 1) }
+        if (r.life <= 0) {
+          scene.remove(r.mesh)
+          r.cleanup?.()
+          ragdolls.splice(i, 1)
+        }
       }
     }
   }

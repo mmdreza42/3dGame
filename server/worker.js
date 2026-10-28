@@ -1,3 +1,4 @@
+/* global WebSocketPair */
 // Cloudflare Worker + Durable Object. One DO per room code. Tick runs only while players are connected.
 // Run locally with:  npx wrangler dev -c server/wrangler.toml   (UNTESTED in this environment, see notes)
 import { GameRoom } from './GameRoom.js'
@@ -9,7 +10,7 @@ export class RoomDO {
     this.state = state
     this.env = env
     this.room = null
-    this.timer = null
+    this.nextTickAt = null
   }
 
   async fetch(request) {
@@ -26,22 +27,48 @@ export class RoomDO {
       close: (c, r) => { try { server.close(c, r) } catch { /* closed */ } },
     }
     this.room.onConnect(conn)
-    this._ensureTick()
+    await this._ensureTick()
     server.addEventListener('message', (ev) => this.room.onMessage(conn, ev.data))
     let gone = false
-    const onGone = () => {
+    const onGone = async () => {
       if (gone) return
       gone = true
       this.room.onDisconnect(conn)
-      if (this.room.connectedCount() === 0 && this.timer) { clearInterval(this.timer); this.timer = null }
+      if (this.room.connectedCount() === 0) {
+        this.nextTickAt = null
+        await this.state.storage.deleteAlarm()
+      }
     }
     server.addEventListener('close', onGone)
     server.addEventListener('error', onGone)
     return new Response(null, { status: 101, webSocket: client })
   }
 
-  _ensureTick() {
-    if (!this.timer) this.timer = setInterval(() => this.room.onTick(Date.now()), 1000 / RATES.TICK_HZ)
+  async _ensureTick() {
+    const currentAlarm = await this.state.storage.getAlarm()
+    if (currentAlarm === null && this.room && this.room.connectedCount() > 0) {
+      const interval = 1000 / RATES.TICK_HZ
+      if (this.nextTickAt === null) this.nextTickAt = Date.now() + interval
+      await this.state.storage.setAlarm(this.nextTickAt)
+    }
+  }
+
+  async alarm() {
+    const now = Date.now()
+    if (this.room && this.room.connectedCount() > 0) {
+      this.room.onTick(now)
+      const interval = 1000 / RATES.TICK_HZ
+      // Keep the schedule anchored to the previous deadline, not alarm completion.
+      if (this.nextTickAt === null) this.nextTickAt = now + interval
+      else this.nextTickAt += interval
+      // If the platform is substantially late, skip stale deadlines rather than
+      // firing a burst of alarms. GameRoom handles elapsed time independently.
+      if (this.nextTickAt <= now - interval) this.nextTickAt = now + interval
+      await this.state.storage.setAlarm(this.nextTickAt)
+    } else {
+      this.nextTickAt = null
+      await this.state.storage.deleteAlarm()
+    }
   }
 }
 
