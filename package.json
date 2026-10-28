@@ -9,7 +9,9 @@
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "pvp:server": "node server/node.mjs",
+    "pvp:smoke": "node tools/net_smoke.mjs ws://localhost:8787"
   },
   "dependencies": {
     "nuxt": "^4.6.2",

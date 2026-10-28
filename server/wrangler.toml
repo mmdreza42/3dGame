@@ -1,0 +1,14 @@
+# Kept in server/ so it never clashes with a Cloudflare Pages config at the project root.
+# Local:   npx wrangler dev -c server/wrangler.toml      (default http://localhost:8787, ws://localhost:8787/room/<code>)
+# Deploy:  npx wrangler deploy -c server/wrangler.toml
+name = "nexus-strike-rooms"
+main = "worker.js"
+compatibility_date = "2025-06-01"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "RoomDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomDO"]
