@@ -104,6 +104,7 @@
       <p style="margin-top:6px;font-size:24px;color:#00ffff;">RESPAWN IN {{ mpCountdown }}</p>
     </div>
     <div v-if="netMode.multi && (gameState === 'playing' || gameState === 'mpdead')" style="position:fixed;left:20px;bottom:24px;z-index:60;font:bold 20px 'Courier New', monospace;color:#00ffaa;text-shadow:0 0 8px #000;">HP {{ Math.max(0, Math.round(playerHp)) }}</div>
+    <div v-if="netMode.multi && (gameState === 'playing' || gameState === 'mpdead')" style="position:fixed;left:20px;bottom:52px;z-index:60;font:bold 16px 'Courier New', monospace;color:#ffaa00;text-shadow:0 0 8px #000;">HEADSHOTS: {{ headshots }}</div>
     <!-- MULTIPLAYER (names are rendered with {{ }} only, never innerHTML) -->
     <div v-if="netMode.multi" style="position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:120;display:flex;gap:12px;align-items:center;font:12px 'Courier New', monospace;color:#00ffff;background:rgba(0,0,0,0.65);border:1px solid #00ffff;padding:4px 10px;box-shadow:0 0 10px rgba(0,255,255,0.3);">
       <span>ROOM {{ netMode.room.toUpperCase() }}</span>
@@ -202,6 +203,7 @@ const maxHp = ref(100)
 const isHurt = ref(false)
 const hitmarker = ref(false)
 const hitmarkerColor = ref('#ff0000')
+const headshots = ref(0)
 const currentWeapon = ref('pistol')
 const gameState = ref('menu')   // 'name' | 'menu' | 'playing' | 'paused' | 'dead' | 'shop' (waves are removed in a later step)
 const wave = ref(1)
@@ -355,7 +357,8 @@ function onNetDamage(d) {
   const mine = d.id === net.selfId
   if (d.by === net.selfId) {
     triggerHitmarker(d.head ? '#ffaa00' : '#ff0000')
-    playSound(d.head ? 'headshot' : 'hit')
+    if (d.head) headshots.value++
+    playSound(d.head ? 'ding' : 'hit')
   }
   if (mine) {
     playerHp.value = d.hp
@@ -1280,6 +1283,7 @@ onMounted(() => {
   const loop = () => {
     const now = performance.now()
     const dt = Math.min((now - lastTime) / 1000, 0.1)
+    if (now - lastTime > 250) console.warn('[SLOW FRAME] ' + Math.round(now - lastTime) + ' ms, weapon=' + currentWeapon.value + ', adsT=' + adsT.toFixed(2) + ', fov=' + camera.fov.toFixed(1))
     lastTime = now
 
     if (explosionTimer > 0) {
@@ -1295,6 +1299,10 @@ onMounted(() => {
       updateRenderables(dt)
     }
 
+    if (netMode.multi) {
+      const lost = gameState.value === 'playing' && document.pointerLockElement !== renderer.domElement
+      if (lockLost.value !== lost) lockLost.value = lost
+    }
     world?.update(dt, now / 1000)
     composer.render()
 

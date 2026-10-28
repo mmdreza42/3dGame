@@ -298,6 +298,17 @@ export function buildWorld(scene, layout, barrels = []) {
   }
   for (const t of P.towers) addTower(t.x, t.z)
 
+  // ---------- houses and forts (boxes come straight from the layout colliders) ----------
+  {
+    const bm = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 1, flatShading: true })
+    const styles = { housewall: bm(0xb59a74), roof: bm(0x7a3b2e), fortwall: bm(0x7d7a70), fortcover: bm(0x6b4c2e) }
+    for (const b of layout.obstacles) {
+      const mat = styles[b.kind]
+      if (!mat) continue
+      addMesh(new THREE.BoxGeometry(b.maxX - b.minX, b.maxY - b.minY, b.maxZ - b.minZ), mat, (b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, (b.minZ + b.maxZ) / 2)
+    }
+  }
+
   // ---------- wrecked trucks ----------
   const TRUCK_COLORS = [0x7a4b33, 0x4f5a3a, 0x5f6670]
   function addTruck(x, z, alongX, colorIdx) {

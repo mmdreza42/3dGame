@@ -18,7 +18,7 @@ export function generateLayout(seedIn) {
   const root = createRng(seed)
 
   const obstacles = []     // AABBs used for collision, bullets, line of sight
-  const props = { crates: [], rocks: [], walls: [], trucks: [], tents: [], camps: [], towers: [], ponds: [], trees: [], giants: [], lamps: [] }
+  const props = { crates: [], rocks: [], walls: [], trucks: [], tents: [], camps: [], towers: [], ponds: [], trees: [], giants: [], lamps: [], houses: [], forts: [] }
   const platforms = []     // standable decks { x, z, hw, hd, y, gap }
   const ladders = []       // { x, z, bottom, top }
   const barrels = []       // { id, x, z }
@@ -50,6 +50,53 @@ export function generateLayout(seedIn) {
       const r = r3(rng.range(6, 9))
       const p = findSpot(rng, r + 4, 78)
       if (p) props.ponds.push({ x: p.x, z: p.z, r })
+    }
+  }
+
+  // ---- forts and houses (solid walls, door and gate gaps, climbable fort towers) ----
+  // side: 0 = +z, 1 = -z, 2 = +x, 3 = -x
+  const wallRun = (kind, cx, cz, half, t, h, side, gap) => {
+    const alongX = side < 2
+    const sign = side % 2 === 0 ? 1 : -1
+    const ext = alongX ? half + t : half - t
+    const segs = gap > 0 ? [[-ext, -gap / 2], [gap / 2, ext]] : [[-ext, ext]]
+    for (const [a, b] of segs) {
+      const m = (a + b) / 2, hl = (b - a) / 2
+      if (alongX) addBox(kind, r3(cx + m), h / 2, r3(cz + sign * half), hl, h / 2, t)
+      else addBox(kind, r3(cx + sign * half), h / 2, r3(cz + m), t, h / 2, hl)
+    }
+  }
+  {
+    const rng = root.fork('forts')
+    for (let i = 0; i < 2; i++) {
+      const p = findSpot(rng, 14, 76, 300)
+      if (!p) continue
+      const { x, z } = p
+      wallRun('fortwall', x, z, 9, 0.6, 5, 0, 4)
+      wallRun('fortwall', x, z, 9, 0.6, 5, 1, 4)
+      wallRun('fortwall', x, z, 9, 0.6, 5, 2, 0)
+      wallRun('fortwall', x, z, 9, 0.6, 5, 3, 0)
+      addBox('fortcover', r3(x + 4.5), 0.6, r3(z + 4), 1, 0.6, 1)
+      addBox('fortcover', r3(x + 4), 0.6, r3(z - 4.5), 1, 0.6, 1)
+      const tx = r3(x - 5.5), tz = r3(z - 5.5)
+      for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) addBox('towerleg', r3(tx + sx * 1.7), 3.5, r3(tz + sz * 1.7), 0.25, 3.5, 0.25)
+      addBox('deck', tx, 7.1, tz, 2.3, 0.15, 2.3)
+      platforms.push({ x: tx, z: tz, hw: 2.3, hd: 2.3, y: 7.25, gap: { x: tx, hw: 0.65 } })
+      ladders.push({ x: tx, z: r3(tz + 2.5), bottom: 0, top: 7.25 })
+      props.towers.push({ x: tx, z: tz })
+      props.forts.push({ x, z })
+    }
+  }
+  {
+    const rng = root.fork('houses')
+    for (let i = 0; i < 3; i++) {
+      const p = findSpot(rng, 7, 80, 300)
+      if (!p) continue
+      const { x, z } = p
+      const door = Math.floor(rng.next() * 4)
+      for (let side = 0; side < 4; side++) wallRun('housewall', x, z, 4, 0.3, 3.2, side, side === door ? 2.4 : 0)
+      addBox('roof', x, 3.35, z, 4.4, 0.15, 4.4)
+      props.houses.push({ x, z, door })
     }
   }
 
