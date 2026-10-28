@@ -333,7 +333,7 @@ function startNet() {
       return { p: [me.x, camera.position.y - 1.6, me.z], y: me.ry, a: camera.rotation.x, w: Math.max(0, WEAPON_LIST.indexOf(currentWeapon.value)) }
     },
   })
-  remotes = new RemotePlayers(scene)
+  remotes = new RemotePlayers(scene, undefined, { getSoldier: () => soldier })
   prevRoster = null
   offNet = [
     net.on('status', (s) => { netStatus.value = s; if (s === 'playing') netNote.value = '' }),
