@@ -15,6 +15,15 @@ export const TEAM_COLORS = [0x00ffff, 0xff7a00]
 export const KILL_LIMIT = 20
 export const MATCH_END_MS = 8000
 
+// team 0 spawns on the left half of the arena (smaller x), team 1 on the right half; si (0..15) picks inside the half
+export function pickSpawn(spawns, team, si) {
+  const sorted = [...spawns].sort((p, q) => p.x - q.x)
+  const half = Math.ceil(sorted.length / 2)
+  const pool = team === 0 ? sorted.slice(0, half) : sorted.slice(half)
+  const list = pool.length ? pool : sorted
+  return list[(si >> 1) % list.length]
+}
+
 // index = weapon id on the wire (same order as WEAPON_LIST in PvpGame.vue)
 export const WEAPONS = [
   { name: 'pistol', damage: 50, fireMs: 200, bullets: 1 },

@@ -179,7 +179,7 @@ import { NetClient } from '../pvp/net/NetClient.js'
 import { WebSocketTransport, resolveWsUrl } from '../pvp/net/WebSocketTransport.js'
 import { RemotePlayers } from '../pvp/net/RemotePlayers.js'
 import { parseNetMode, wsBaseFor, ROOM_CAPACITY } from '../pvp/net/netMode.js'
-import { segmentHitsPlayer, RESPAWN_MS, teamOf, KILL_LIMIT } from '../../shared/combat.js'
+import { segmentHitsPlayer, RESPAWN_MS, teamOf, KILL_LIMIT, pickSpawn } from '../../shared/combat.js'
 import { buildGuns } from '../game/guns.js'
 import { enemyExtras, buildEnemyMesh, updateEnemyVisuals, hideEnemyExtras } from '../game/enemies.js'
 
@@ -260,7 +260,7 @@ function goToRoom(code) {
 function placeAtSpawn(slot) {
   const pts = layout && layout.playerSpawns
   if (!net || net.status !== 'playing' || !pts || !pts.length) return false
-  const s = pts[(slot ?? net.slot) % pts.length]
+  const s = pickSpawn(pts, teamOf(net.slot), slot ?? net.slot)
   me.x = s.x; me.z = s.z; me.ry = s.ry
   camera.position.x = s.x; camera.position.z = s.z; camera.position.y = 1.6
   verticalVel = 0; isGrounded = true; climbing = null
