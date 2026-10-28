@@ -1,5 +1,3 @@
 <template>
-  <ClientOnly>
-    <Game />
-  </ClientOnly>
+  <NuxtPage />
 </template>
