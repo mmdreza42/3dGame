@@ -11,7 +11,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "pvp:server": "node server/node.mjs",
-    "pvp:smoke": "node tools/net_smoke.mjs ws://localhost:8787"
+    "pvp:smoke": "node tools/net_smoke.mjs ws://localhost:8787",
+    "pvp:bots": "node tools/net_bots.mjs ws://localhost:8787"
   },
   "dependencies": {
     "nuxt": "^4.6.2",

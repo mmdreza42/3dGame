@@ -1,0 +1,122 @@
+import { describe, it, expect } from 'vitest'
+import { GameRoom } from '../../server/GameRoom.js'
+import { T, encode, decodeClient, decodeServer } from '../../shared/protocol.js'
+import { RESPAWN_MS, SPAWN_PROTECT_MS } from '../../shared/combat.js'
+
+function setup() {
+  let now = 1000
+  const room = new GameRoom({ code: 'abcd', sanitizeName: (raw) => raw, now: () => now })
+  const s = {
+    room,
+    get now() { return now },
+    mk() { const c = { out: [], send(str) { c.out.push(JSON.parse(str)) }, close() {} }; room.onConnect(c); return c },
+    hello(c, n) { room.onMessage(c, encode({ t: T.HELLO, v: 1, n })) },
+    input(c, seq, x, z) { room.onMessage(c, encode({ t: T.INPUT, s: seq, p: [x, 0, z], y: 0, a: 0, w: 0 })) },
+    hit(c, g, h = 0, w = 0) { room.onMessage(c, encode({ t: T.HIT, g, h, w })) },
+    got(c, t) { return c.out.filter((m) => m.t === t) },
+    adv(ms) { now += ms; room.onTick(now) },
+  }
+  return s
+}
+
+// A = id 1 at (0,0), B = id 2 at (10,0)
+function duel() {
+  const s = setup()
+  const a = s.mk(), b = s.mk()
+  s.hello(a, 'A'); s.hello(b, 'B')
+  s.input(a, 1, 0, 0); s.input(b, 1, 10, 0)
+  return { s, a, b }
+}
+
+describe('PvP combat (server)', () => {
+  it('pistol headshot kills in one hit and scores it', () => {
+    const { s, a, b } = duel()
+    s.hit(a, 2, 1, 0)
+    expect(s.got(b, T.DMG)[0]).toEqual({ t: T.DMG, id: 2, by: 1, hp: 0, h: 1 })
+    expect(s.got(a, T.SCORES)[0].p).toEqual([[1, 1, 0], [2, 0, 1]])
+  })
+  it('two pistol body shots kill', () => {
+    const { s, a, b } = duel()
+    s.hit(a, 2); s.hit(a, 2)
+    expect(s.got(b, T.DMG).map((m) => m.hp)).toEqual([50, 0])
+  })
+  it('a dead player has no snapshot row', () => {
+    const { s, a } = duel()
+    s.hit(a, 2, 1, 0)
+    s.adv(100); s.adv(100)
+    const snap = s.got(a, T.SNAPSHOT).at(-1)
+    expect(snap.p.map((r) => r[0])).toEqual([1])
+  })
+  it('ignores self, unknown and not-yet-spawned targets', () => {
+    const { s, a } = duel()
+    const c = s.mk(); s.hello(c, 'C') // no input yet = no position
+    s.hit(a, 1); s.hit(a, 99); s.hit(a, 3)
+    expect(s.got(a, T.DMG)).toHaveLength(0)
+  })
+  it('ignores targets out of range', () => {
+    const { s, a, b } = duel()
+    s.input(b, 2, 400, 0)
+    s.hit(a, 2, 1, 0)
+    expect(s.got(a, T.DMG)).toHaveLength(0)
+  })
+  it('time budget limits the hit rate', () => {
+    const { s, a } = duel()
+    const pa = s.room.players.get(1)
+    pa.budget = 0; pa.budgetAt = s.now
+    s.hit(a, 2)
+    expect(s.got(a, T.DMG)).toHaveLength(0)
+    s.adv(250)
+    s.hit(a, 2)
+    expect(s.got(a, T.DMG)).toHaveLength(1)
+  })
+  it('respawns after RESPAWN_MS', () => {
+    const { s, a, b } = duel()
+    s.hit(a, 2, 1, 0)
+    s.adv(RESPAWN_MS - 1)
+    expect(s.got(b, T.RESPAWN)).toHaveLength(0)
+    s.adv(1)
+    const r = s.got(b, T.RESPAWN)[0]
+    expect(r.id).toBe(2)
+    expect(typeof r.si).toBe('number')
+    expect(s.room.players.get(2).hp).toBe(100)
+  })
+  it('spawn protection blocks hits for SPAWN_PROTECT_MS', () => {
+    const { s, a, b } = duel()
+    s.hit(a, 2, 1, 0)
+    s.adv(RESPAWN_MS)
+    s.input(b, 2, 10, 0)
+    s.hit(a, 2, 1, 0)
+    expect(s.got(a, T.DMG)).toHaveLength(1)
+    s.adv(SPAWN_PROTECT_MS)
+    s.hit(a, 2, 1, 0)
+    expect(s.got(a, T.DMG)).toHaveLength(2)
+  })
+  it('a dead player cannot hit', () => {
+    const { s, a, b } = duel()
+    s.hit(a, 2, 1, 0)
+    s.hit(b, 1, 1, 0)
+    expect(s.got(a, T.DMG)).toHaveLength(1)
+  })
+  it('late joiner gets the scores after a kill', () => {
+    const { s, a } = duel()
+    s.hit(a, 2, 1, 0)
+    const c = s.mk(); s.hello(c, 'C')
+    expect(s.got(c, T.SCORES)).toHaveLength(1)
+  })
+  it('no scores message before the first kill', () => {
+    const s = setup()
+    const a = s.mk(); s.hello(a, 'A')
+    expect(s.got(a, T.SCORES)).toHaveLength(0)
+  })
+  it('protocol: client HIT validator', () => {
+    expect(decodeClient(encode({ t: 'x', g: 2, h: 1, w: 0 })).ok).toBe(true)
+    expect(decodeClient(encode({ t: 'x', g: 2, h: 1, w: 5 })).ok).toBe(false)
+    expect(decodeClient(encode({ t: 'x', g: 2, h: 1, w: 0, z: 1 })).ok).toBe(false)
+  })
+  it('protocol: server DMG / SCORES / RESPAWN validators', () => {
+    expect(decodeServer(encode({ t: 'm', id: 2, by: 1, hp: 50, h: 0 })).ok).toBe(true)
+    expect(decodeServer(encode({ t: 'z', p: [[1, 1, 0], [2, 0, 1]] })).ok).toBe(true)
+    expect(decodeServer(encode({ t: 'r', id: 2, si: 8 })).ok).toBe(true)
+    expect(decodeServer(encode({ t: 'r', id: 2, si: 99 })).ok).toBe(false)
+  })
+})
