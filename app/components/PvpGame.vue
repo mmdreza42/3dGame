@@ -1312,7 +1312,9 @@ onMounted(() => {
       renderer.setViewport(innerWidth - 220, innerHeight - 220, 200, 200)
       renderer.setScissor(innerWidth - 220, innerHeight - 220, 200, 200)
       renderer.setScissorTest(true)
+      renderer.shadowMap.autoUpdate = false
       renderer.render(scene, miniMapCamera)
+      renderer.shadowMap.autoUpdate = true
       renderer.setViewport(0, 0, innerWidth, innerHeight)
       renderer.setScissor(0, 0, innerWidth, innerHeight)
       renderer.setScissorTest(false)
@@ -1326,6 +1328,7 @@ onMounted(() => {
     const now = performance.now()
     const cfg = WEAPON_CONFIG[currentWeapon.value]
     rgbShiftPass.uniforms['amount'].value = THREE.MathUtils.lerp(rgbShiftPass.uniforms['amount'].value, 0, dt * 10)
+    rgbShiftPass.enabled = rgbShiftPass.uniforms['amount'].value > 0.0003
     if (overchargeTimer.value > 0) { overchargeTimer.value -= dt; if (overchargeTimer.value < 0) overchargeTimer.value = 0 }
 
     // ---- input state ----

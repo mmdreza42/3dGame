@@ -497,3 +497,4 @@ describe('RemotePlayers', () => {
 EOT
 
 echo "patched PvpGame.vue + nuxt.config.ts, wrote netMode.js, RemotePlayers.js, 2 test files"
+
