@@ -103,6 +103,7 @@
     <!-- MULTIPLAYER (names are rendered with {{ }} only, never innerHTML) -->
     <div v-if="netMode.multi" style="position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:120;display:flex;gap:12px;align-items:center;font:12px 'Courier New', monospace;color:#00ffff;background:rgba(0,0,0,0.65);border:1px solid #00ffff;padding:4px 10px;box-shadow:0 0 10px rgba(0,255,255,0.3);">
       <span>ROOM {{ netMode.room.toUpperCase() }}</span>
+      <span :style="{ color: myTeam === 0 ? '#00ffff' : '#ff9a3c' }">TEAM {{ myTeam === 0 ? 'CYAN' : 'ORANGE' }}</span>
       <span :style="{ color: netStatus === 'playing' ? '#00ffaa' : '#ff0055' }">{{ netStatus.toUpperCase() }}</span>
       <span v-if="netStatus === 'playing'">{{ netPing }} ms · {{ netRoster.length }}/{{ ROOM_CAPACITY }}</span>
       <button @click="copyRoomLink" style="font:bold 12px 'Courier New', monospace;color:#000;background:#00ffff;border:none;padding:3px 8px;cursor:pointer;">{{ linkCopied ? 'COPIED' : 'COPY LINK' }}</button>
@@ -110,7 +111,8 @@
     <div v-if="netMode.multi && netNote" style="position:fixed;top:44px;left:50%;transform:translateX(-50%);z-index:120;font:bold 14px 'Courier New', monospace;color:#ff0055;background:rgba(0,0,0,0.75);border:1px solid #ff0055;padding:6px 14px;max-width:80vw;word-break:break-all;">{{ netNote }}</div>
     <div v-if="netMode.multi && showScoreboard" style="position:fixed;top:18%;left:50%;transform:translateX(-50%);z-index:30;min-width:320px;background:rgba(0,0,0,0.8);border:2px solid #00ffff;box-shadow:0 0 20px rgba(0,255,255,0.35);padding:14px 22px;font:16px 'Courier New', monospace;color:#fff;">
       <div style="color:#00ffff;font-weight:bold;letter-spacing:3px;margin-bottom:8px;">PLAYERS · {{ netRoster.length }}/{{ ROOM_CAPACITY }}</div>
-      <div v-for="p in netRoster" :key="p.id" :style="{ color: p.self ? '#00ffff' : '#fff', padding: '2px 0' }"><span style="display:inline-block;min-width:150px;">{{ p.name }}<span v-if="p.self" style="color:#ff0055;"> (YOU)</span></span><span style="color:#00ffaa;display:inline-block;min-width:50px;text-align:right;">K {{ p.k }}</span><span style="color:#ff0055;display:inline-block;min-width:50px;text-align:right;">D {{ p.d }}</span></div>
+      <div style="margin-bottom:8px;"><span style="color:#00ffff;">CYAN {{ teamKills[0] }}</span> <span style="color:#aaa;">:</span> <span style="color:#ff9a3c;">{{ teamKills[1] }} ORANGE</span></div>
+      <div v-for="p in netRoster" :key="p.id" :style="{ color: p.team === 0 ? '#00ffff' : '#ff9a3c', fontWeight: p.self ? 'bold' : 'normal', padding: '2px 0' }"><span style="display:inline-block;min-width:150px;">{{ p.name }}<span v-if="p.self" style="color:#ff0055;"> (YOU)</span></span><span style="color:#00ffaa;display:inline-block;min-width:50px;text-align:right;">K {{ p.k }}</span><span style="color:#ff0055;display:inline-block;min-width:50px;text-align:right;">D {{ p.d }}</span></div>
     </div>
     <div v-if="netMode.multi && gameState === 'playing' && lockLost" style="position:fixed;top:60%;left:50%;transform:translateX(-50%);z-index:90;pointer-events:none;font:bold 28px 'Courier New', monospace;color:#00ffff;text-shadow:0 0 15px #00ffff,0 2px 4px #000;">CLICK TO RESUME</div>
     <div v-if="netMode.multi && netStatus === 'full'" style="position:fixed;inset:0;background:rgba(0,0,0,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:130;color:#fff;font-family:'Courier New', monospace;">
@@ -173,7 +175,7 @@ import { NetClient } from '../pvp/net/NetClient.js'
 import { WebSocketTransport, resolveWsUrl } from '../pvp/net/WebSocketTransport.js'
 import { RemotePlayers } from '../pvp/net/RemotePlayers.js'
 import { parseNetMode, wsBaseFor, ROOM_CAPACITY } from '../pvp/net/netMode.js'
-import { segmentHitsPlayer, RESPAWN_MS } from '../../shared/combat.js'
+import { segmentHitsPlayer, RESPAWN_MS, teamOf } from '../../shared/combat.js'
 import { buildGuns } from '../game/guns.js'
 import { enemyExtras, buildEnemyMesh, updateEnemyVisuals, hideEnemyExtras } from '../game/enemies.js'
 
@@ -265,12 +267,14 @@ function placeAtSpawn(slot) {
 function syncNetUi() {
   if (!net) return
   netPing.value = Math.round(net.rtt)
-  const list = net.scoreboard().map((p) => ({ ...p, k: (net.scores.get(p.id) || {}).k || 0, d: (net.scores.get(p.id) || {}).d || 0 }))
+  const list = net.scoreboard().map((p) => ({ ...p, team: teamOf((net.roster.get(p.id) || {}).slot || 0), k: (net.scores.get(p.id) || {}).k || 0, d: (net.scores.get(p.id) || {}).d || 0 }))
   list.sort((a, b) => (b.k - a.k) || (a.d - b.d) || a.name.localeCompare(b.name))
   netRoster.value = list
 }
 
 let remoteList = [], mpTimer = null, mpRespawnAt = 0
+const myTeam = ref(0)
+const teamKills = computed(() => { const t = [0, 0]; for (const p of netRoster.value) t[p.team] += p.k; return t })
 const mpKiller = ref('')
 const mpCountdown = ref(0)
 
@@ -337,7 +341,7 @@ function startNet() {
   prevRoster = null
   offNet = [
     net.on('status', (s) => { netStatus.value = s; if (s === 'playing') netNote.value = '' }),
-    net.on('welcome', () => { if (!spawnedOnce && gameState.value === 'playing') placeAtSpawn() }),
+    net.on('welcome', () => { myTeam.value = teamOf(net.slot); if (!spawnedOnce && gameState.value === 'playing') placeAtSpawn() }),
     net.on('roster', (m) => {
       const cur = new Map([...m.values()].map((p) => [p.id, p.name]))
       if (prevRoster) {
@@ -1338,6 +1342,7 @@ onMounted(() => {
       if (!hit && net && remoteList.length) {
         const wpn = Math.max(0, WEAPON_LIST.indexOf(l.weapon))
         for (const r of remoteList) {
+          if (teamOf(r.slot) === myTeam.value) continue // bullets pass through teammates
           const res = segmentHitsPlayer([px0, py0, pz0], [l.mesh.position.x, l.mesh.position.y, l.mesh.position.z], r)
           if (!res) continue
           net.sendHit(r.id, res.head, wpn)

@@ -7,7 +7,7 @@ import {
   decodeClient, encode, round, nextShard, seedFromRoom, makeToken,
 } from '../shared/protocol.js'
 import {
-  PLAYER_HP, RESPAWN_MS, SPAWN_PROTECT_MS, MAX_HIT_DIST, BUDGET_CAP_MS, damageFor, hitCost,
+  PLAYER_HP, RESPAWN_MS, SPAWN_PROTECT_MS, MAX_HIT_DIST, BUDGET_CAP_MS, damageFor, hitCost, teamOf,
 } from '../shared/combat.js'
 import { segmentClear } from '../shared/collide.js'
 import { generateLayout } from '../shared/layout.js'
@@ -168,6 +168,7 @@ export class GameRoom {
     if (!a.alive || !a.pos) return
     const t = this.players.get(m.g)
     if (!t || t === a || !t.conn || !t.alive || !t.pos || now < t.shieldUntil) return
+    if (teamOf(t.slot) === teamOf(a.slot)) return // no friendly fire
     if (Math.hypot(a.pos[0] - t.pos[0], a.pos[1] - t.pos[1], a.pos[2] - t.pos[2]) > MAX_HIT_DIST) return
     if (!this._canSee(a.pos, t.pos)) return
     a.budget = Math.min(BUDGET_CAP_MS, a.budget + (now - a.budgetAt))

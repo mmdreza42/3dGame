@@ -3,6 +3,7 @@
 // Names are drawn on a canvas with fillText only (never HTML).
 import * as THREE from 'three'
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js'
+import { teamOf, TEAM_COLORS } from '../../../shared/combat.js'
 
 function makeTag(T, name) {
   if (typeof document === 'undefined') return null
@@ -66,7 +67,7 @@ export class RemotePlayers {
     const gltf = this._soldier()
     if (gltf) return this._createSoldier(p, gltf)
     const T = this.T
-    const color = new T.Color().setHSL((p.slot % 16) / 16, 0.8, 0.5)
+    const color = new T.Color(TEAM_COLORS[teamOf(p.slot)])
     const mat = new T.MeshStandardMaterial({ color, roughness: 0.6, emissive: color, emissiveIntensity: 0.25 })
     const group = new T.Group()
     const body = new T.Mesh(this.bodyGeo, mat); body.position.y = 0.65
@@ -96,7 +97,7 @@ export class RemotePlayers {
     const group = new T.Group()
     const model = this.cloneModel(gltf.scene)
     model.rotation.y = Math.PI // the model faces +Z, our forward is -Z
-    const tint = new T.Color().setHSL((p.slot % 16) / 16, 0.7, 0.6).lerp(new T.Color(0xffffff), 0.3)
+    const tint = new T.Color(TEAM_COLORS[teamOf(p.slot)]).lerp(new T.Color(0xffffff), 0.35)
     const mats = []
     model.traverse((o) => {
       if (!o.isMesh) return
