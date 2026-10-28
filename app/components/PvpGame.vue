@@ -668,7 +668,10 @@ function equipGun(name) {
     if (g.cycle) g.cycle.position.z = g.cycleBaseZ
   }
   activeGun = guns.models[name]
-  activeGun.muzzle.add(guns.flash, guns.light)
+  activeGun.muzzle.add(guns.flash)
+  // light lives on the camera so hiding the sniper never changes the scene light count (no shader recompile)
+  guns.light.position.set(0.15, -0.12, -0.9)
+  camera.add(guns.light)
   guns.flash.visible = false
   guns.light.intensity = 0
   cycleT = 0; flashT = 0
@@ -1283,7 +1286,6 @@ onMounted(() => {
   const loop = () => {
     const now = performance.now()
     const dt = Math.min((now - lastTime) / 1000, 0.1)
-    if (now - lastTime > 250) console.warn('[SLOW FRAME] ' + Math.round(now - lastTime) + ' ms, weapon=' + currentWeapon.value + ', adsT=' + adsT.toFixed(2) + ', fov=' + camera.fov.toFixed(1))
     lastTime = now
 
     if (explosionTimer > 0) {
