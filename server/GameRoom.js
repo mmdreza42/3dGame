@@ -7,7 +7,7 @@ import {
   decodeClient, encode, round, nextShard, seedFromRoom, makeToken,
 } from '../shared/protocol.js'
 import {
-  PLAYER_HP, RESPAWN_MS, SPAWN_PROTECT_MS, MAX_HIT_DIST, BUDGET_CAP_MS, damageFor, hitCost, teamOf,
+  PLAYER_HP, RESPAWN_MS, SPAWN_PROTECT_MS, MAX_HIT_DIST, BUDGET_CAP_MS, damageFor, hitCost, teamOf, KILL_LIMIT, MATCH_END_MS,
 } from '../shared/combat.js'
 import { segmentClear } from '../shared/collide.js'
 import { generateLayout } from '../shared/layout.js'
@@ -32,6 +32,7 @@ export class GameRoom {
     this.snapAcc = 0
     this.lastTickAt = null
     this.killsTotal = 0
+    this.matchEndsAt = 0
     this._obstacles = opts.obstacles ?? null // AABB list; built lazily from the seed when not given
   }
 
@@ -165,7 +166,7 @@ export class GameRoom {
   _hit(s, m, now) {
     const a = s.player
     if (!a) return this._strike(s, ERR.NO_HELLO)
-    if (!a.alive || !a.pos) return
+    if (!a.alive || !a.pos || this.matchEndsAt) return
     const t = this.players.get(m.g)
     if (!t || t === a || !t.conn || !t.alive || !t.pos || now < t.shieldUntil) return
     if (teamOf(t.slot) === teamOf(a.slot)) return // no friendly fire
@@ -186,6 +187,12 @@ export class GameRoom {
     this.killsTotal++
     t.respawnAt = now + RESPAWN_MS
     this._broadcast(this._scoresMsg())
+    let tk = 0
+    for (const q of this.players.values()) if (teamOf(q.slot) === teamOf(a.slot)) tk += q.kills
+    if (tk >= KILL_LIMIT) {
+      this.matchEndsAt = now + MATCH_END_MS
+      this._broadcast({ t: T.MATCH, w: teamOf(a.slot), ms: MATCH_END_MS })
+    }
   }
 
   // wire positions are FEET positions. Eye = feet + 1.6. Accept when the eye can see the target's chest OR head.
@@ -202,6 +209,17 @@ export class GameRoom {
   }
 
   _respawns(now) {
+    if (this.matchEndsAt) {
+      if (now < this.matchEndsAt) return
+      this.matchEndsAt = 0
+      this.killsTotal = 0
+      for (const p of this.players.values()) {
+        p.kills = 0; p.deaths = 0; p.alive = true; p.hp = PLAYER_HP; p.pos = null; p.shieldUntil = now + SPAWN_PROTECT_MS
+      }
+      this._broadcast(this._scoresMsg())
+      for (const p of this.players.values()) this._broadcast({ t: T.RESPAWN, id: p.id, si: (p.slot * 2 + 1) % LIMITS.SPAWN_SLOTS })
+      return
+    }
     for (const p of this.players.values()) {
       if (p.alive || now < p.respawnAt) continue
       p.alive = true

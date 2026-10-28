@@ -157,6 +157,9 @@ export class NetClient {
         for (const [id, k, d] of m.p) this.scores.set(id, { k, d })
         this._emit('scores', this.scores)
         break
+      case T.MATCH:
+        this._emit('match', { winner: m.w, ms: m.ms })
+        break
       case T.RESPAWN:
         this._remote.delete(m.id)
         this._emit('respawn', { id: m.id, slot: m.si })

@@ -94,6 +94,10 @@
       <button @click="startNextWave" style="margin-top:50px;padding:15px 40px;font-size:24px;font-weight:bold;background:#00ffff;color:#000;border:none;border-radius:2px;cursor:pointer;box-shadow:0 0 20px #00ffff;">START WAVE {{ wave + 1 }}</button>
     </div>
 
+    <div v-if="netMode.multi && matchWinner >= 0" style="position:fixed;top:28%;left:50%;transform:translateX(-50%);z-index:125;pointer-events:none;text-align:center;font-family:'Courier New', monospace;">
+      <h1 :style="{ fontSize: '60px', margin: 0, color: matchWinner === 0 ? '#00ffff' : '#ff9a3c', textShadow: '0 0 25px currentColor' }">{{ matchWinner === 0 ? 'CYAN' : 'ORANGE' }} TEAM WINS</h1>
+      <p style="color:#fff;font-size:20px;margin-top:10px;">NEW MATCH STARTING...</p>
+    </div>
     <div v-if="netMode.multi && gameState === 'mpdead'" style="position:fixed;inset:0;background:rgba(90,0,25,0.45);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:110;pointer-events:none;color:#fff;font-family:'Courier New', monospace;">
       <h1 style="font-size:64px;margin:0;color:#ff0055;text-shadow:0 0 20px #ff0055;">YOU DIED</h1>
       <p style="margin-top:12px;font-size:20px;">KILLED BY {{ mpKiller }}</p>
@@ -111,7 +115,7 @@
     <div v-if="netMode.multi && netNote" style="position:fixed;top:44px;left:50%;transform:translateX(-50%);z-index:120;font:bold 14px 'Courier New', monospace;color:#ff0055;background:rgba(0,0,0,0.75);border:1px solid #ff0055;padding:6px 14px;max-width:80vw;word-break:break-all;">{{ netNote }}</div>
     <div v-if="netMode.multi && showScoreboard" style="position:fixed;top:18%;left:50%;transform:translateX(-50%);z-index:30;min-width:320px;background:rgba(0,0,0,0.8);border:2px solid #00ffff;box-shadow:0 0 20px rgba(0,255,255,0.35);padding:14px 22px;font:16px 'Courier New', monospace;color:#fff;">
       <div style="color:#00ffff;font-weight:bold;letter-spacing:3px;margin-bottom:8px;">PLAYERS · {{ netRoster.length }}/{{ ROOM_CAPACITY }}</div>
-      <div style="margin-bottom:8px;"><span style="color:#00ffff;">CYAN {{ teamKills[0] }}</span> <span style="color:#aaa;">:</span> <span style="color:#ff9a3c;">{{ teamKills[1] }} ORANGE</span></div>
+      <div style="margin-bottom:8px;"><span style="color:#00ffff;">CYAN {{ teamKills[0] }}</span> <span style="color:#aaa;">:</span> <span style="color:#ff9a3c;">{{ teamKills[1] }} ORANGE</span> <span style="color:#666;">· FIRST TO {{ KILL_LIMIT }}</span></div>
       <div v-for="p in netRoster" :key="p.id" :style="{ color: p.team === 0 ? '#00ffff' : '#ff9a3c', fontWeight: p.self ? 'bold' : 'normal', padding: '2px 0' }"><span style="display:inline-block;min-width:150px;">{{ p.name }}<span v-if="p.self" style="color:#ff0055;"> (YOU)</span></span><span style="color:#00ffaa;display:inline-block;min-width:50px;text-align:right;">K {{ p.k }}</span><span style="color:#ff0055;display:inline-block;min-width:50px;text-align:right;">D {{ p.d }}</span></div>
     </div>
     <div v-if="netMode.multi && gameState === 'playing' && lockLost" style="position:fixed;top:60%;left:50%;transform:translateX(-50%);z-index:90;pointer-events:none;font:bold 28px 'Courier New', monospace;color:#00ffff;text-shadow:0 0 15px #00ffff,0 2px 4px #000;">CLICK TO RESUME</div>
@@ -175,7 +179,7 @@ import { NetClient } from '../pvp/net/NetClient.js'
 import { WebSocketTransport, resolveWsUrl } from '../pvp/net/WebSocketTransport.js'
 import { RemotePlayers } from '../pvp/net/RemotePlayers.js'
 import { parseNetMode, wsBaseFor, ROOM_CAPACITY } from '../pvp/net/netMode.js'
-import { segmentHitsPlayer, RESPAWN_MS, teamOf } from '../../shared/combat.js'
+import { segmentHitsPlayer, RESPAWN_MS, teamOf, KILL_LIMIT } from '../../shared/combat.js'
 import { buildGuns } from '../game/guns.js'
 import { enemyExtras, buildEnemyMesh, updateEnemyVisuals, hideEnemyExtras } from '../game/enemies.js'
 
@@ -274,6 +278,7 @@ function syncNetUi() {
 
 let remoteList = [], mpTimer = null, mpRespawnAt = 0
 const myTeam = ref(0)
+const matchWinner = ref(-1)
 const teamKills = computed(() => { const t = [0, 0]; for (const p of netRoster.value) t[p.team] += p.k; return t })
 const mpKiller = ref('')
 const mpCountdown = ref(0)
@@ -312,7 +317,7 @@ function onNetDamage(d) {
 }
 
 function onNetRespawn(d) {
-  if (!net || d.id !== net.selfId || gameState.value !== 'mpdead') return
+  if (!net || d.id !== net.selfId || (gameState.value !== 'mpdead' && gameState.value !== 'playing')) return
   if (mpTimer !== null) { clearInterval(mpTimer); mpTimer = null }
   playerHp.value = 100; maxHp.value = 100
   isReloading.value = false
@@ -357,7 +362,8 @@ function startNet() {
     net.on('lost', () => { netNote.value = 'CONNECTION LOST: reload the page' }),
     net.on('damage', onNetDamage),
     net.on('scores', () => syncNetUi()),
-    net.on('respawn', onNetRespawn),
+    net.on('respawn', (d) => { onNetRespawn(d); if (d.id === net.selfId) matchWinner.value = -1 }),
+    net.on('match', (d) => { matchWinner.value = d.winner; setTimeout(() => { matchWinner.value = -1 }, d.ms + 1500) }),
     net.on('server-error', (d) => { if (d.code === 'version') netNote.value = 'VERSION MISMATCH: reload the page' }),
   ]
   statTimer = setInterval(syncNetUi, 250)

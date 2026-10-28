@@ -10,6 +10,7 @@ export const T = {
   WELCOME: 'w', SNAPSHOT: 's', JOIN: 'j', LEAVE: 'l', FULL: 'f', ERROR: 'e', PONG: 'o', // server -> client
   HIT: 'x', // client -> server: I hit player g
   DMG: 'm', SCORES: 'z', RESPAWN: 'r', // server -> client: damage/kill, kills+deaths table, respawn
+  MATCH: 'n', // server -> client: a team won, new match in ms
 }
 
 // error codes carried in {t:'e', c}
@@ -192,6 +193,11 @@ const SERVER = {
     for (const r of m.p) {
       if (!Array.isArray(r) || r.length !== 3 || !isInt(r[0], 1, 2147483647) || !isInt(r[1], 0, 1000000) || !isInt(r[2], 0, 1000000)) return 'row'
     }
+    return null
+  },
+  [T.MATCH](m) {
+    if (!onlyKeys(m, ['t', 'w', 'ms'])) return 'keys'
+    if (!isInt(m.w, 0, 1) || !isInt(m.ms, 0, 60000)) return 'w/ms'
     return null
   },
   [T.RESPAWN](m) {

@@ -12,6 +12,8 @@ export const HEAD_FRAC = 0.25
 // teams come from the spawn slot (already on the wire): slot 0,2,4,6 = team 0; 1,3,5,7 = team 1
 export const teamOf = (slot) => slot & 1
 export const TEAM_COLORS = [0x00ffff, 0xff7a00]
+export const KILL_LIMIT = 20
+export const MATCH_END_MS = 8000
 
 // index = weapon id on the wire (same order as WEAPON_LIST in PvpGame.vue)
 export const WEAPONS = [
