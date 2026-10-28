@@ -42,7 +42,8 @@ check(bots.every((b) => b.roster.length === 3), `each bot knows 3 names: ${bots.
 const b0x = bots[1].seen.get(bots[0].id)
 check(b0x > 0, `BETA sees ALPHA moving (x=${b0x})`)
 const dup = bot('ALPHA', 0)
-await new Promise((r) => setTimeout(r, 400))
+for (let i = 0; i < 50 && !dup.id; i++) await new Promise((r) => setTimeout(r, 100))
+await new Promise((r) => setTimeout(r, 200))
 check(dup.roster.includes('ALPHA2') || dup.roster.some((n) => n !== 'ALPHA' && n.startsWith('ALPHA')), `duplicate name was renamed (${dup.roster.join('/')})`)
 bots.push(dup)
 for (const b of bots) { clearInterval(b.timer); b.ws.close() }
