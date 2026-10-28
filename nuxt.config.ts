@@ -3,6 +3,6 @@ export default defineNuxtConfig({
     '@nuxt/eslint'
   ],
   nitro: {
-    preset: 'cloudflare-pages'
+    preset: 'cloudflare_module'
   }
 })
